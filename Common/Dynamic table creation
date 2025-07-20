@@ -1,0 +1,276 @@
+PREPARE_ALLOCATION_ALV_TABLE
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  METHOD prepare_allocation_alv_table.
+
+    DATA:lo_table_allocation TYPE REF TO data,
+         lo_new_type         TYPE REF TO cl_abap_structdescr,
+         lo_new_tab          TYPE REF TO cl_abap_tabledescr.
+
+    FIELD-SYMBOLS:
+      <lfs_t_allocation> TYPE ANY TABLE.
+
+*Prepare allocation detail table
+    CLEAR mt_allocation_data.
+
+*Prepare fieldcatalog
+    prepare_allocation_fieldcat( IMPORTING et_fieldcatalog = DATA(lt_allocation_fieldcatalog) ).
+
+*Create structure description
+    lo_new_type = cl_abap_structdescr=>create( lt_allocation_fieldcatalog ).
+
+*Create new table type
+    lo_new_tab = cl_abap_tabledescr=>create(
+      p_line_type  = lo_new_type
+      p_table_kind = cl_abap_tabledescr=>tablekind_std
+      p_unique     = abap_false ).
+
+*Assign table to data reference
+    CREATE DATA lo_table_allocation TYPE HANDLE lo_new_tab.
+    ASSIGN lo_table_allocation->* TO <lfs_t_allocation>.
+    GET REFERENCE OF <lfs_t_allocation> INTO mt_allocation_data.
+
+  ENDMETHOD.
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  METHOD prepare_allocation_fieldcat.
+
+    DATA:
+      lv_length           TYPE i,
+      lo_element          TYPE REF TO cl_abap_elemdescr,
+      lt_sequence_details TYPE upott_uae_no_vol_alloc_seq,
+      lv_qty_descp        TYPE string,
+      lv_spl_char         TYPE string VALUE '~!@#$%/\^&*().,-{}<>:;"[]=~`'.
+
+    CONSTANTS:lc_glg           TYPE char3  VALUE 'GLG',
+              lc_rlf           TYPE char3  VALUE 'RLF',
+              lc_gas           TYPE char3  VALUE 'GAS',
+              lc_water         TYPE char5  VALUE 'WATER',
+              lc_self          TYPE char5  VALUE 'SELF',
+              lc_exc           TYPE char5  VALUE 'EXCH',
+              lc_rem_after     TYPE char10 VALUE 'REM_AFTER',
+              lc_exc_vol       TYPE char10 VALUE 'EXCH_VOL',
+              lc_exc_allocated TYPE char20 VALUE 'EXC_ALLOCATED'.
+
+    CLEAR et_fieldcatalog.
+
+    APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING FIELD-SYMBOL(<lfs_component>).
+    IF <lfs_component> IS ASSIGNED.
+      <lfs_component>-name = 'WC_ID'.
+      <lfs_component>-type = cl_abap_elemdescr=>get_c( p_length = 30 ).
+    ENDIF.
+
+    lo_element ?= cl_abap_elemdescr=>describe_by_name( 'GHO_QUANTITY_DEC' ).
+    APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+    IF <lfs_component> IS ASSIGNED.
+      <lfs_component>-name = 'FORMATION'.
+      <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                       p_decimals = lo_element->decimals ).
+    ENDIF.
+
+    APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+    IF <lfs_component> IS ASSIGNED.
+      <lfs_component>-name = 'GAS_LIFT'.
+      <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                       p_decimals = lo_element->decimals ).
+    ENDIF.
+
+    APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+    IF <lfs_component> IS ASSIGNED.
+      <lfs_component>-name = 'TOTAL'.
+      <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                       p_decimals = lo_element->decimals ).
+    ENDIF.
+
+    APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+    IF <lfs_component> IS ASSIGNED.
+      <lfs_component>-name = 'ADJ_THEO'.
+      <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                       p_decimals = lo_element->decimals ).
+    ENDIF.
+
+    lt_sequence_details = mo_network->mt_no_vol_alloc_sequence.
+    DELETE lt_sequence_details WHERE quant_cat = if_c_uae_constants=>gc_volume_types-production.
+    DELETE lt_sequence_details WHERE quant_cat IS INITIAL.
+
+    DATA(lt_seq_details) = lt_sequence_details.
+    DELETE lt_sequence_details WHERE quant_cat NE if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory AND
+                                     quant_cat NE if_c_uae_constants=>gc_volume_types-return_lease_fuel AND
+                                     quant_cat NE if_c_uae_constants=>gc_volume_types-gas_injection AND
+                                     quant_cat NE if_c_uae_constants=>gc_volume_types-injection_other.
+
+    SORT lt_sequence_details BY quant_cat.
+    DELETE ADJACENT DUPLICATES FROM lt_sequence_details COMPARING quant_cat.
+    SORT lt_sequence_details BY sequence.
+
+    LOOP AT lt_sequence_details ASSIGNING FIELD-SYMBOL(<fs_seq_det>) WHERE
+         quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory OR
+         quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel OR
+         quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection OR
+         quant_cat EQ if_c_uae_constants=>gc_volume_types-injection_other.
+
+*Self allocation
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+
+        IF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory.
+          <lfs_component>-name = lc_glg && '_' && lc_self.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel.
+          <lfs_component>-name = lc_rlf && '_' && lc_self.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection.
+          <lfs_component>-name = lc_gas && '_' && lc_self.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-injection_other.
+          <lfs_component>-name = lc_water && '_' && lc_self.
+        ENDIF.
+
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+
+        DATA(lv_self_col_name) = <lfs_component>-name.
+      ENDIF.
+
+*Remaining after self allocation
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+        <lfs_component>-name = 'REM_AFTER' && '_' && lv_self_col_name.
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+      ENDIF.
+
+*Volume for Exchange
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+
+        IF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory.
+          <lfs_component>-name = lc_glg && '_' && lc_exc_vol.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel.
+          <lfs_component>-name = lc_rlf && '_' && lc_exc_vol.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection.
+          <lfs_component>-name = lc_gas && '_' && lc_exc_vol.
+        ENDIF.
+
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+      ENDIF.
+
+*Allocation through Exchange
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+
+        IF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory.
+          <lfs_component>-name = lc_glg && '_' && lc_exc_allocated.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel.
+          <lfs_component>-name = lc_rlf && '_' && lc_exc_allocated.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection.
+          <lfs_component>-name = lc_gas && '_' && lc_exc_allocated.
+        ENDIF.
+
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+      ENDIF.
+
+*Remaining after exchanges
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+
+        IF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory.
+          <lfs_component>-name = lc_rem_after && '_' && lc_glg && '_' && lc_exc.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel.
+          <lfs_component>-name = lc_rem_after && '_' && lc_rlf && '_' && lc_exc.
+        ELSEIF <fs_seq_det>-quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection.
+          <lfs_component>-name = lc_rem_after && '_' && lc_gas && '_' && lc_exc.
+        ENDIF.
+
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+      ENDIF.
+
+    ENDLOOP.
+
+    SELECT *
+    FROM gho_disp_t
+    INTO TABLE @DATA(lt_qty_type_descp)
+    WHERE language_id EQ @sy-langu.
+    IF sy-subrc EQ 0.
+      SORT lt_qty_type_descp BY qty_type.
+    ENDIF.
+
+    DELETE lt_seq_details WHERE quant_cat EQ if_c_uae_constants=>gc_volume_types-glg_non_adjustedinventory OR
+                                quant_cat EQ if_c_uae_constants=>gc_volume_types-return_lease_fuel OR
+                                quant_cat EQ if_c_uae_constants=>gc_volume_types-gas_injection OR
+                                quant_cat EQ if_c_uae_constants=>gc_volume_types-injection_other.
+    SORT lt_seq_details BY sequence.
+
+    LOOP AT lt_seq_details ASSIGNING <fs_seq_det>.
+
+      APPEND INITIAL LINE TO mo_network->mt_quantity_type_descp ASSIGNING FIELD-SYMBOL(<lfs_qty_descp>).
+      IF <lfs_qty_descp> IS ASSIGNED.
+        <lfs_qty_descp>-qty_type = <fs_seq_det>-quant_type.
+
+        IF line_exists( lt_qty_type_descp[ qty_type = <fs_seq_det>-quant_type ] ).
+          CLEAR lv_qty_descp.
+          lv_qty_descp = lt_qty_type_descp[ qty_type = <fs_seq_det>-quant_type ]-qty_type_descr+0(5).
+
+          CLEAR lv_length.
+          lv_length = strlen( lv_qty_descp ).
+          DO lv_length TIMES.
+            lv_length = lv_length - 1.
+            IF lv_qty_descp+lv_length(1) CA lv_spl_char.
+              REPLACE lv_qty_descp+lv_length(1) WITH space INTO lv_qty_descp.
+            ENDIF.
+          ENDDO.
+          CONDENSE lv_qty_descp.
+
+          SPLIT lv_qty_descp AT space INTO DATA(lv_var1) DATA(lv_var2).
+          IF lv_var2 IS NOT INITIAL.
+            REPLACE ALL OCCURRENCES OF ` ` IN lv_qty_descp WITH '_'.
+          ENDIF.
+
+          <lfs_qty_descp>-qty_type_descr = lv_qty_descp && '_' && <fs_seq_det>-quant_type.
+        ENDIF.
+      ENDIF.
+
+*Disposition Allocation
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+
+        IF line_exists( lt_qty_type_descp[ qty_type = <fs_seq_det>-quant_type ] ).
+          CLEAR lv_qty_descp.
+          lv_qty_descp = lt_qty_type_descp[ qty_type = <fs_seq_det>-quant_type ]-qty_type_descr+0(5).
+
+          CLEAR lv_length.
+          lv_length = strlen( lv_qty_descp ).
+          DO lv_length TIMES.
+            lv_length = lv_length - 1.
+            IF lv_qty_descp+lv_length(1) CA lv_spl_char.
+              REPLACE lv_qty_descp+lv_length(1) WITH space INTO lv_qty_descp.
+            ENDIF.
+          ENDDO.
+          CONDENSE lv_qty_descp.
+
+          CLEAR:lv_var1,lv_var2.
+          SPLIT lv_qty_descp AT space INTO lv_var1 lv_var2.
+          IF lv_var2 IS NOT INITIAL.
+            REPLACE ALL OCCURRENCES OF ` ` IN lv_qty_descp WITH '_'.
+          ENDIF.
+
+          <lfs_component>-name = lv_qty_descp && '_'  && <fs_seq_det>-quant_type.
+        ENDIF.
+
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+        lv_self_col_name = <lfs_component>-name.
+      ENDIF.
+
+*Remaining
+      APPEND INITIAL LINE TO et_fieldcatalog ASSIGNING <lfs_component>.
+      IF <lfs_component> IS ASSIGNED.
+        <lfs_component>-name = 'REM_AFTER' && '_' && lv_self_col_name.
+        <lfs_component>-type = cl_abap_elemdescr=>get_p( p_length   = lo_element->length
+                                                         p_decimals = lo_element->decimals ).
+      ENDIF.
+
+    ENDLOOP.
+
+    DELETE et_fieldcatalog WHERE name IS INITIAL.
+  ENDMETHOD.
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+MT_ALLOCATION_DATA	Instance Attribute	Protected	Type Ref To	DATA
