@@ -1,0 +1,93 @@
+DATA : 
+    lv_fm_name TYPE rs38l_fnam, 
+    ls_ctrlop  TYPE ssfctrlop, 
+    ls_outopt  TYPE ssfcompop, 
+    lv_belnr   TYPE belnr_d, 
+    lv_gjahr   TYPE gjahr, 
+    lv_vinno   TYPE zbelnr_d, 
+    lv_cnt     TYPE c VALUE '1', 
+    lv_inter   TYPE boolean, 
+    ls_return  TYPE ssfcrescl. 
+ 
+  DATA:lt_otf TYPE STANDARD TABLE OF itcoo. 
+ 
+  CLEAR gt_cnt. 
+ 
+  WHILE lv_cnt LT 4. 
+    APPEND INITIAL LINE TO  gt_cnt ASSIGNING FIELD-SYMBOL(<lfs_cnt>). 
+    IF <lfs_cnt> IS ASSIGNED. 
+      <lfs_cnt>-lv_cnt = lv_cnt. 
+    ENDIF. 
+ 
+    lv_cnt = lv_cnt + 1. 
+  ENDWHILE. 
+ 
+*Get smartform. 
+  CLEAR lv_fm_name. 
+  CALL FUNCTION 'SSF_FUNCTION_MODULE_NAME' 
+    EXPORTING 
+      formname           = 'ZMM_DELIVERY_CHALLAN' 
+    IMPORTING 
+      fm_name            = lv_fm_name 
+    EXCEPTIONS 
+      no_form            = 1 
+      no_function_module = 2 
+      OTHERS             = 3. 
+  IF sy-subrc <> 0. 
+* Implement suitable error handling here 
+  ELSE. 
+ 
+    CLEAR ls_ctrlop. 
+    ls_ctrlop-device = 'PRINTER'. 
+    ls_ctrlop-preview = abap_true. 
+    ls_ctrlop-no_dialog = abap_true. 
+    ls_ctrlop-getotf = abap_true. 
+ 
+    CLEAR ls_outopt. 
+    ls_outopt-tddest    = 'LP01 '. 
+ 
+    CLEAR lt_otf. 
+    LOOP AT gt_cnt ASSIGNING <lfs_cnt>. 
+ 
+      CLEAR ls_return. 
+      CALL FUNCTION lv_fm_name 
+        EXPORTING 
+          control_parameters = ls_ctrlop 
+          output_options     = ls_outopt 
+          v_belnr            = lv_belnr 
+          v_gjahr            = lv_gjahr 
+          lv_c               = <lfs_cnt>-lv_cnt 
+          lv_flag            = '' 
+          ls_challan_data    = ls_challan_data 
+          lv_challan_no      = gv_challan_number 
+          lv_vinno           = lv_vinno 
+          lv_inter           = lv_inter 
+        IMPORTING 
+          job_output_info    = ls_return 
+        TABLES 
+          it_final           = gt_data 
+        EXCEPTIONS 
+          formatting_error   = 1 
+          internal_error     = 2 
+          send_error         = 3 
+          user_canceled      = 4 
+          OTHERS             = 5. 
+ 
+      APPEND LINES OF ls_return-otfdata TO lt_otf. 
+ 
+    ENDLOOP. 
+ 
+    CALL FUNCTION 'SSFCOMP_PDF_PREVIEW' 
+      EXPORTING 
+        i_otf                    = lt_otf 
+      EXCEPTIONS 
+        convert_otf_to_pdf_error = 1 
+        cntl_error               = 2 
+        OTHERS                   = 3. 
+    IF sy-subrc <> 0. 
+* Implement suitable error handling here 
+    ENDIF. 
+ 
+  ENDIF. 
+ 
+ENDFORM. 
