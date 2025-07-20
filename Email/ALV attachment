@@ -1,0 +1,148 @@
+Sending ALV as excel file attached in email.   
+
+DATA: 
+    lv_version TYPE string, 
+    lv_flavour TYPE fpm_file_name, 
+    lv_result  TYPE os_boolean, 
+    lv_string  TYPE xstring, 
+    lv_size    TYPE sood-objlen, 
+    lv_filetyp TYPE salv_bs_constant, 
+    lv_length  TYPE so_obj_len, 
+    lv_len     TYPE i, 
+    lv_subject TYPE sood-objdes. 
+ 
+  DATA: 
+    lo_send_request TYPE REF TO cl_bcs, 
+    lo_sender       TYPE REF TO cl_cam_address_bcs, 
+    lo_recipient    TYPE REF TO if_recipient_bcs, 
+    lo_result       TYPE REF TO cl_salv_ex_result_data_table, 
+    lo_data         TYPE REF TO data, 
+    lo_document     TYPE REF TO cl_document_bcs, 
+    lt_email_body   TYPE TABLE OF soli, 
+    lt_fieldcatalog TYPE TABLE OF lvc_s_fcat, 
+    lt_return       TYPE STANDARD TABLE OF bapiret2, 
+    lt_address      TYPE STANDARD TABLE OF bapiadsmtp. 
+ 
+*Internal table declarations. 
+  DATA: 
+    lt_header TYPE soli_tab, 
+    lt_binary TYPE solix_tab. 
+ 
+  IF gt_all_challan_data IS NOT INITIAL. 
+ 
+*Prepare email body 
+    CLEAR lt_email_body. 
+    APPEND INITIAL LINE TO lt_email_body ASSIGNING FIELD-SYMBOL(<lfs_email_body>). 
+    IF <lfs_email_body> IS ASSIGNED. 
+      <lfs_email_body>-line = TEXT-010. 
+    ENDIF. 
+ 
+*Prepare Email content 
+    CLEAR gt_email_data. 
+    PERFORM get_email_data USING gt_all_challan_data 
+                                                     CHANGING gt_email_data. 
+*Prepare Fieldcatalog 
+    CLEAR lt_fieldcatalog. ( Pass fieldname and reptext ) 
+    PERFORM get_fieldcatalog CHANGING lt_fieldcatalog. 
+ 
+    TRY. 
+        lo_send_request = cl_bcs=>create_persistent( ). 
+ 
+        lo_document = cl_document_bcs=>create_document( 
+                                                              i_type    = 'RAW' 
+                                                              i_text    = lt_email_body 
+                                                              i_length  = '255' 
+                                                              i_subject = TEXT-011 ). 
+ 
+        GET REFERENCE OF gt_email_data[] INTO lo_data. 
+ 
+        CLEAR lo_result. 
+        lo_result = cl_salv_ex_util=>factory_result_data_table( 
+                                                      r_data           = lo_data 
+                                                      t_fieldcatalog = lt_fieldcatalog ). 
+ 
+        CLEAR:lv_version,lv_filetyp,lv_flavour. 
+        lv_version = cl_salv_bs_a_xml_base=>get_version( ). 
+        lv_filetyp = if_salv_bs_xml=>c_type_xlsx. 
+        lv_flavour = if_salv_bs_c_tt=>c_tt_xml_flavour_export. 
+ 
+        CLEAR lv_string. 
+        CALL METHOD cl_salv_bs_tt_util=>if_salv_bs_tt_util~transform 
+          EXPORTING 
+            xml_type      = lv_filetyp 
+            xml_version   = lv_version 
+            r_result_data = lo_result 
+            xml_flavour   = lv_flavour 
+            gui_type      = if_salv_bs_xml=>c_gui_type_gui 
+          IMPORTING 
+            xml           = lv_string. 
+ 
+        CLEAR lv_size. 
+        lv_size = xstrlen( lv_string ). 
+ 
+        CLEAR:lt_binary, lv_length. 
+        CALL FUNCTION 'SCMS_XSTRING_TO_BINARY' 
+          EXPORTING 
+            buffer        = lv_string 
+          IMPORTING 
+            output_length = lv_len 
+          TABLES 
+            binary_tab    = lt_binary. 
+ 
+        APPEND INITIAL LINE TO lt_header ASSIGNING FIELD-SYMBOL(<lfs_header>). 
+        IF <lfs_header> IS ASSIGNED. 
+          <lfs_header>-line = 'Challan_Report' && '_' && sy-datlo. 
+        ENDIF. 
+ 
+        CLEAR lv_subject. 
+        lv_subject = 'Challan_Report' && '_' && sy-datlo && '.XLSX'. 
+ 
+        CALL METHOD lo_document->add_attachment 
+          EXPORTING 
+            i_attachment_type    = 'BIN' " type of data 
+            i_attachment_subject = lv_subject 
+            i_attachment_size    = lv_size 
+            i_att_content_hex    = lt_binary 
+            i_attachment_header  = lt_header. 
+ 
+*Add document to send request 
+        CALL METHOD lo_send_request->set_document( lo_document ). 
+ 
+*Set email sender 
+        CLEAR:lt_return,lt_address. 
+        CALL FUNCTION 'BAPI_USER_GET_DETAIL' 
+          EXPORTING 
+            username = sy-uname 
+          TABLES 
+            return   = lt_return 
+            addsmtp  = lt_address. 
+ 
+        IF line_exists( lt_address[ 1 ] ). 
+          lo_sender = cl_cam_address_bcs=>create_internet_address( lt_address[ 1 ]-e_mail ). 
+        ENDIF. 
+ 
+        lo_send_request->set_sender( lo_sender ). 
+ 
+*Set Email receivers 
+        lo_recipient = cl_cam_address_bcs=>create_internet_address( 'abhinav.goel@2isolutions.com' ). 
+        CALL METHOD lo_send_request->add_recipient 
+          EXPORTING 
+            i_recipient  = lo_recipient 
+            i_express    = abap_true 
+            i_copy       = abap_true 
+            i_blind_copy = abap_false 
+            i_no_forward = abap_false. 
+ 
+*Send Email 
+        CLEAR lv_result. 
+        CALL METHOD lo_send_request->send( 
+          EXPORTING 
+            i_with_error_screen = abap_true 
+          RECEIVING 
+            result              = lv_result ). 
+ 
+        COMMIT WORK. 
+      CATCH cx_bcs INTO DATA(bcs_exception). 
+    ENDTRY. 
+ 
+  ENDIF. 
