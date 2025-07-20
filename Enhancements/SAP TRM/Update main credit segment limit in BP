@@ -1,0 +1,242 @@
+Transaction Code: Business Partner (BP)  
+
+Code to update the Main credit segment ‘0000’ limit value with total of all other non-main credit segments limits in BP.  
+
+*&---------------------------------------------------------------------* 
+*& Include ZTRI_BP_MAIN_CR_SEG_UP_PROCESS 
+*&---------------------------------------------------------------------* 
+ 
+DATA:ls_but000       TYPE but000, 
+     ls_credit_sgmnt TYPE ukm_credit_sgmnt. 
+ 
+DATA:lt_credit_segment TYPE STANDARD TABLE OF ukmbp_cms_sgm. 
+ 
+DATA:lo_facade       TYPE REF TO cl_ukm_facade, 
+     lo_bupa_factory TYPE REF TO cl_ukm_bupa_factory, 
+     lo_partner      TYPE REF TO cl_ukm_business_partner, 
+     lo_account      TYPE REF TO cl_ukm_account. 
+ 
+CLEAR gt_output. 
+ 
+*Get BP 
+IF s_bp IS INITIAL. 
+  SELECT partner 
+  FROM but100 
+  WHERE rltyp EQ 'UKM000' 
+  INTO TABLE @DATA(lt_bp). 
+  IF sy-subrc EQ 0. 
+    SORT lt_bp BY partner. 
+    DELETE ADJACENT DUPLICATES FROM lt_bp COMPARING partner. 
+  ENDIF. 
+ELSE. 
+  SELECT partner 
+  FROM but100 
+  WHERE partner IN @s_bp AND 
+        rltyp EQ 'UKM000' 
+  INTO TABLE @lt_bp. 
+  IF sy-subrc EQ 0. 
+    SORT lt_bp BY partner. 
+    DELETE ADJACENT DUPLICATES FROM lt_bp COMPARING partner. 
+  ENDIF. 
+ENDIF. 
+ 
+IF lt_bp IS NOT INITIAL. 
+  DATA(rt_bp) = VALUE /dmbe/ttd_r_partner( FOR ls_bp IN lt_bp ( sign   = if_fsbp_const_range=>sign_include 
+                                                                option = if_fsbp_const_range=>option_equal 
+                                                                low    = ls_bp-partner ) ). 
+ENDIF. 
+ 
+*Get total credit limit for all BP 
+*---------------------------------------------------------------------------------------- 
+IF rt_bp IS NOT INITIAL. 
+ 
+  SELECT partner     AS bp, 
+         SUM( credit_limit ) AS total_credit_limit, 
+         SUM( cred_lim_calc ) AS total_cr_cal_limit 
+  FROM ukmbp_cms_sgm 
+  WHERE partner IN @rt_bp AND 
+        credit_sgmnt IN ( SELECT credit_sgmnt FROM ukmcred_sgm0c WHERE main_cred_sgmnt NE @abap_true  ) AND "#EC CI_BUFFSUBQ 
+        credit_sgmnt NE @space AND 
+        credit_sgmnt NE '0000' AND 
+        cred_lim_req IS INITIAL GROUP BY partner 
+  INTO TABLE @DATA(lt_credit_limit). 
+  IF sy-subrc EQ 0. 
+ 
+*Get credit limit of main credit segment for all BP 
+*---------------------------------------------------------------------------------------- 
+    SELECT * 
+    FROM ukmbp_cms_sgm 
+    WHERE partner IN @rt_bp AND 
+          credit_sgmnt EQ '0000' 
+    INTO TABLE @DATA(lt_main_seg_limit). 
+    IF sy-subrc EQ 0. 
+      SORT lt_main_seg_limit BY partner. 
+    ENDIF. 
+ 
+*Check for BP where change in main credit segment is applicable and update Calculated 
+*and Requested credit limit in UKMBP_CMS_SGM table for main credit segment('0000') 
+*---------------------------------------------------------------------------------------- 
+    CLEAR lt_credit_segment. 
+    IF lt_main_seg_limit IS NOT INITIAL. 
+      LOOP AT lt_main_seg_limit ASSIGNING FIELD-SYMBOL(<lfs_main_seg_limit>). 
+ 
+        LOOP AT lt_credit_limit ASSIGNING FIELD-SYMBOL(<lfs_credit_limit>) 
+          WHERE total_credit_limit NE <lfs_main_seg_limit>-credit_limit AND 
+                bp                 EQ <lfs_main_seg_limit>-partner. 
+          APPEND INITIAL LINE TO lt_credit_segment ASSIGNING FIELD-SYMBOL(<lfs_credit_segment>). 
+          IF <lfs_credit_segment> IS ASSIGNED. 
+            MOVE-CORRESPONDING <lfs_main_seg_limit> TO <lfs_credit_segment>. 
+            <lfs_credit_segment>-limit_chg_date   = sy-datlo. 
+            <lfs_credit_segment>-cred_lim_calc    = <lfs_credit_limit>-total_credit_limit. 
+            <lfs_credit_segment>-cred_lim_req     = <lfs_credit_limit>-total_credit_limit. 
+          ENDIF. 
+          DATA(lv_change_found) = abap_true. 
+        ENDLOOP. 
+ 
+        IF lv_change_found EQ abap_false. 
+          APPEND INITIAL LINE TO gt_output ASSIGNING FIELD-SYMBOL(<lfs_output>). 
+          IF <lfs_output> IS ASSIGNED. 
+            <lfs_output>-comments = TEXT-003. 
+            <lfs_output>-partner  = <lfs_main_seg_limit>-partner. 
+          ENDIF. 
+        ENDIF. 
+ 
+        CLEAR lv_change_found. 
+      ENDLOOP. 
+    ENDIF. 
+ 
+    IF lt_credit_segment IS NOT INITIAL. 
+      UPDATE ukmbp_cms_sgm FROM TABLE lt_credit_segment. 
+      IF sy-subrc EQ 0. 
+        COMMIT WORK. 
+      ENDIF. 
+    ENDIF. 
+ 
+  ENDIF. 
+ 
+ENDIF. 
+*---------------------------------------------------------------------------------------- 
+ 
+*Mass update of credit limit in main credit segment in BP 
+*---------------------------------------------------------------------------------------- 
+IF lt_credit_segment IS NOT INITIAL. 
+ 
+  ls_credit_sgmnt = '0000'. 
+ 
+*Get instance of SAP credit management 
+  lo_facade = cl_ukm_facade=>create( i_activity = cl_ukm_cnst_eventing=>bp_maintenance ). 
+ 
+*Get instance of BP factory 
+  IF lo_facade IS BOUND. 
+    lo_bupa_factory = lo_facade->get_bupa_factory( ). 
+  ENDIF. 
+ 
+  LOOP AT lt_credit_segment ASSIGNING <lfs_credit_segment>. 
+ 
+    CLEAR ls_but000-partner. 
+    ls_but000-partner = <lfs_credit_segment>-partner. 
+ 
+*Get instance of BP 
+    IF lo_bupa_factory IS BOUND. 
+ 
+      IF lo_partner IS BOUND. 
+        CLEAR lo_partner. 
+      ENDIF. 
+ 
+      lo_partner = lo_bupa_factory->get_business_partner( ls_but000-partner ). 
+    ENDIF. 
+ 
+*Get instance of credit account 
+    IF lo_partner IS BOUND. 
+ 
+      IF lo_account IS BOUND. 
+        CLEAR lo_account. 
+      ENDIF. 
+ 
+      CALL METHOD lo_bupa_factory->get_credit_account 
+        EXPORTING 
+          i_partner         = ls_but000-partner 
+          i_credit_sgmnt    = ls_credit_sgmnt 
+        RECEIVING 
+          ro_credit_account = lo_account. 
+ 
+      IF lo_account IS BOUND. 
+        lo_account->handle_requested_limit( abap_true ).  "Update BP 
+ 
+*Save changes in BP 
+        TRY. 
+            lo_bupa_factory->save_all( ).                 "Save   BP 
+ 
+            CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' 
+              EXPORTING 
+                wait = abap_true. 
+ 
+*Map successfully updated data to output 
+            APPEND INITIAL LINE TO gt_output ASSIGNING <lfs_output>. 
+            IF <lfs_output> IS ASSIGNED. 
+              MOVE-CORRESPONDING <lfs_credit_segment> TO <lfs_output>. 
+              CLEAR <lfs_output>-cred_lim_req. 
+ 
+              <lfs_output>-comments      = TEXT-002. 
+              <lfs_output>-is_success    = abap_true. 
+              <lfs_output>-credit_limit  = <lfs_credit_segment>-cred_lim_calc. 
+ 
+              IF line_exists( lt_credit_limit[ bp = <lfs_credit_segment>-partner ] ). 
+                <lfs_output>-cred_lim_calc = lt_credit_limit[ bp = <lfs_credit_segment>-partner ]-total_cr_cal_limit. 
+              ENDIF. 
+ 
+            ENDIF. 
+ 
+          CATCH cx_root INTO DATA(lo_exception). 
+            CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'. 
+ 
+            APPEND INITIAL LINE TO gt_output ASSIGNING <lfs_output>. 
+            IF <lfs_output> IS ASSIGNED. 
+              <lfs_output>-comments = TEXT-004. 
+              <lfs_output>-partner  = <lfs_credit_segment>-partner. 
+            ENDIF. 
+        ENDTRY. 
+ 
+      ENDIF. 
+    ENDIF. 
+ 
+  ENDLOOP. 
+ 
+ENDIF. 
+*---------------------------------------------------------------------------------------- 
+ 
+*Get updated data from UKMBP_CMS_SGM table for main credit segment 
+*---------------------------------------------------------------------------------------- 
+IF rt_bp IS NOT INITIAL. 
+  SELECT * 
+  FROM ukmbp_cms_sgm 
+  WHERE partner IN @rt_bp AND 
+        credit_sgmnt EQ '0000' 
+  INTO TABLE @DATA(lt_main_seg_limit_new). 
+  IF sy-subrc EQ 0. 
+    SORT lt_main_seg_limit_new BY partner. 
+  ENDIF. 
+ENDIF. 
+ 
+*Mass Update of credit limit validity date in the Credit Main segment 
+*---------------------------------------------------------------------------------------- 
+CLEAR lt_credit_segment. 
+LOOP AT gt_output ASSIGNING <lfs_output> WHERE is_success EQ abap_true. 
+  LOOP AT lt_main_seg_limit_new ASSIGNING FIELD-SYMBOL(<lfs_main_seg_limit_new>) 
+    WHERE partner EQ <lfs_output>-partner. 
+    APPEND INITIAL LINE TO lt_credit_segment ASSIGNING <lfs_credit_segment>. 
+    IF <lfs_credit_segment> IS ASSIGNED. 
+      MOVE-CORRESPONDING <lfs_main_seg_limit_new> TO <lfs_credit_segment>. 
+      <lfs_credit_segment>-limit_valid_date = sy-datlo + 183. 
+      <lfs_output>-limit_valid_date = sy-datlo + 183. 
+    ENDIF. 
+  ENDLOOP. 
+ENDLOOP. 
+ 
+IF lt_credit_segment IS NOT INITIAL. 
+  UPDATE ukmbp_cms_sgm FROM TABLE lt_credit_segment. 
+  IF sy-subrc EQ 0. 
+    COMMIT WORK. 
+  ENDIF. 
+ENDIF. 
+*---------------------------------------------------------------------------------------- 
