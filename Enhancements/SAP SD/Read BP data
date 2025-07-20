@@ -1,0 +1,75 @@
+  METHOD if_ex_bupa_frg0060_update~change_before_update.
+
+    CLEAR:zcl_sd_sap_bp_integration=>gt_new_sales_data,
+          zcl_sd_sap_bp_integration=>gt_old_sales_data,
+          zcl_sd_sap_bp_integration=>gt_old_company_code_data,
+          zcl_sd_sap_bp_integration=>gt_new_company_code_data,
+          zcl_sd_sap_bp_integration=>gt_cus_master_sales_new_data,
+          zcl_sd_sap_bp_integration=>gt_cus_master_sales_old_data,
+          zcl_sd_sap_bp_integration=>gs_cus_credit_profile_data,
+          zcl_sd_sap_bp_integration=>gv_current_comp_code,
+          zcl_sd_sap_bp_integration=>gv_current_sales_org,
+          zcl_sd_sap_bp_integration=>gv_old_customer_group.
+
+*Get current partner functions.
+    DATA(lo_ref) = fsbp_bdt_adapter_intern=>get_instance( EXPORTING i_objap = gc_bupa ).  "'BUPA'
+
+    DATA(lo_ref1) = xo_bdt_adapter=>get_instance( EXPORTING i_objap = gc_bupa ).  "'BUPA'
+
+    DATA(lv_bp) = cvi_bdt_adapter=>get_current_bp( ).
+
+    IF lo_ref  IS NOT INITIAL AND
+       lo_ref1 IS NOT INITIAL AND
+       lv_bp IS NOT INITIAL.
+
+*Get customer master sales data.
+      cvi_bdt_adapter=>get_table_data(
+        EXPORTING
+          i_table_name = gc_knvv  "'KNVV'
+        IMPORTING
+          e_data_new   = zcl_sd_sap_bp_integration=>gt_cus_master_sales_new_data
+          e_data_old   = zcl_sd_sap_bp_integration=>gt_cus_master_sales_old_data ).
+
+*Get sales area data.
+      cvi_bdt_adapter=>get_table_data(
+        EXPORTING
+          i_table_name = gc_knvp  "'KNVP'
+        IMPORTING
+          e_data_new   = zcl_sd_sap_bp_integration=>gt_new_sales_data
+          e_data_old   = zcl_sd_sap_bp_integration=>gt_old_sales_data ).
+
+*Get company code data.
+      cvi_bdt_adapter=>get_table_data(
+        EXPORTING
+          i_table_name = gc_knb1  "'KNB1'
+        IMPORTING
+          e_data_new   = zcl_sd_sap_bp_integration=>gt_new_company_code_data
+          e_data_old   = zcl_sd_sap_bp_integration=>gt_old_company_code_data ).
+
+*Get customer credit group.
+      CALL FUNCTION 'UKM_BUPA_UKMBP_CMS_GET'
+        IMPORTING
+          e_ukmbp_cms = zcl_sd_sap_bp_integration=>gs_cus_credit_profile_data.
+
+      SELECT SINGLE credit_group
+                    FROM ukmbp_cms
+                    INTO @DATA(lv_old_credit_group)
+                    WHERE partner = @lv_bp.
+      IF sy-subrc = 0.
+        zcl_sd_sap_bp_integration=>gv_old_customer_group = lv_old_credit_group.
+      ENDIF.
+
+      IF zcl_sd_sap_bp_integration=>gs_cus_credit_profile_data IS INITIAL.
+        zcl_sd_sap_bp_integration=>gs_cus_credit_profile_data-credit_group = lv_old_credit_group.
+      ENDIF.
+
+*Get current company code.
+      zcl_sd_sap_bp_integration=>gv_current_comp_code = cvi_bdt_adapter=>get_current_company_code( ).
+
+*Get current sales Area.
+      DATA(ls_current_sales_area) = cvi_bdt_adapter=>get_current_sales_area( ).
+      zcl_sd_sap_bp_integration=>gv_current_sales_org = ls_current_sales_area-sales_org.
+
+    ENDIF.
+
+  ENDMETHOD.
