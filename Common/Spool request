@@ -1,0 +1,2402 @@
+*Set runtime data.
+    cl_salv_bs_runtime_info=>set(
+    EXPORTING
+      display = abap_true
+      metadata = abap_false
+      data     = abap_true
+).
+
+*Set Email data in memory
+    cl_salv_bs_runtime_info=>set_data(
+      EXPORTING
+        data      = i_t_confirm_data_email
+    ).
+
+    SUBMIT zdogsr_plane_price_adv_email TO SAP-SPOOL
+    DESTINATION 'LP01'
+    IMMEDIATELY ''
+    KEEP IN SPOOL 'X'
+    WITHOUT SPOOL DYNPRO AND RETURN.
+
+Code of Report : ZDOGSR_PLANE_PRICE_ADV_EMAIL
+
+  DATA:
+    go_alv_instance      TYPE REF TO cl_salv_table,
+    gt_confirmation_data TYPE STANDARD TABLE OF ty_confirmation_data,
+    gt_price_alv_fields  TYPE STANDARD TABLE OF ty_price_alv_fields.
+
+FIELD-SYMBOLS:<lfs_t_confirm_data_email> TYPE STANDARD TABLE.
+
+  DATA:lv_report TYPE programm.
+
+  DATA:
+    lo_instance    TYPE REF TO zcl_ogs_into_plane_price_adv,
+    lo_print       TYPE REF TO cl_salv_print,
+    ls_pparameters TYPE pri_params,
+    ls_print_ctrl  TYPE alv_s_pctl,
+    lo_data        TYPE REF TO data.
+
+  CLEAR:lo_instance,go_alv_instance.
+
+*Get class instance.
+  lo_instance = zcl_ogs_into_plane_price_adv=>get_instance(  EXPORTING i_date = sy-datlo ).
+
+  TRY.
+      " get data from SALV model
+      cl_salv_bs_runtime_info=>get_data_ref(
+            IMPORTING
+              r_data = lo_data
+      ).
+
+      ASSIGN lo_data->* TO <lfs_t_confirm_data_email>.
+    CATCH cx_salv_bs_sc_runtime_info.
+  ENDTRY.
+
+*Generate ALV instance.
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING
+          r_salv_table = go_alv_instance
+        CHANGING
+          t_table      = <lfs_t_confirm_data_email> ).
+
+*Prepare ALV header.
+      lo_instance->prepare_alv_header(
+        CHANGING
+          c_o_alv_instance = go_alv_instance ).
+
+*Prepare ALV Footer.
+      lo_instance->prepare_alv_footer(
+        CHANGING
+          c_o_alv_instance = go_alv_instance ).
+
+*Hide columns in email.
+      PERFORM hide_columns_in_email.
+
+*Change column headings.
+      lo_instance->chg_col_text_confirmation_data(
+     CHANGING
+       c_o_alv_instance = go_alv_instance ).
+
+*Get print parameters.
+      lo_print = go_alv_instance->get_print( ).
+
+      CLEAR lv_report.
+      lv_report = lo_instance->gc_email_report.
+      PERFORM print_parameters USING lv_report CHANGING ls_pparameters.
+
+      CLEAR ls_print_ctrl.
+
+      ls_print_ctrl = lo_print->get_print_control( ).
+      ls_print_ctrl-pri_params = ls_pparameters.
+      lo_print->set_print_control( ls_print_ctrl ).
+      lo_print->set_print_only( if_salv_c_bool_sap=>true ).
+      go_alv_instance->display( ).
+
+    CATCH cx_salv_msg.
+  ENDTRY.
+
+------------------------------------------------------------------------------
+Performs code:
+
+*&---------------------------------------------------------------------*
+*& Form print_parameters
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LS_PPARAMETERS
+*&---------------------------------------------------------------------*
+FORM print_parameters USING i_report TYPE programm
+                          CHANGING c_s_pparameters TYPE pri_params.
+
+  DATA:lv_var TYPE i.
+
+  CLEAR c_s_pparameters.
+  CALL FUNCTION 'GET_PRINT_PARAMETERS'
+    EXPORTING
+      no_dialog              = abap_true
+    IMPORTING
+      out_parameters         = c_s_pparameters
+    EXCEPTIONS
+      archive_info_not_found = 1
+      invalid_print_params   = 2
+      invalid_archive_params = 3
+      OTHERS                 = 4.
+  IF sy-subrc NE 0.
+    IF lv_var IS NOT INITIAL.
+      CLEAR lv_var.
+    ENDIF.
+  ENDIF.
+
+  CONCATENATE i_report+0(9) sy-uname+0(3) INTO c_s_pparameters-prtxt
+  SEPARATED BY space.
+
+ENDFORM.
+-----------------------------------------
+DATA:
+    lo_columns TYPE REF TO cl_salv_columns_table,
+    lo_column  TYPE REF TO cl_salv_column_table.
+
+  lo_columns = go_alv_instance->get_columns( ).
+
+  TRY.
+      lo_column ?= lo_columns->get_column( 'KUNNR' ).
+      lo_column->set_visible( abap_false ).
+    CATCH cx_salv_not_found.
+  ENDTRY.
+
+  TRY.
+      lo_column ?= lo_columns->get_column( 'NAME1' ).
+      lo_column->set_visible( abap_false ).
+    CATCH cx_salv_not_found.
+  ENDTRY.
+
+  TRY.
+      lo_column ?= lo_columns->get_column( 'VSTEL' ).
+      lo_column->set_visible( abap_false ).
+    CATCH cx_salv_not_found.
+  ENDTRY.
+
+  TRY.
+      lo_column ?= lo_columns->get_column( 'EMAIL_SENT' ).
+      lo_column->set_visible( abap_false ).
+    CATCH cx_salv_not_found.
+  ENDTRY.
+
+------------------------------------------------------------------------------
+Above methods code:
+
+class ZCL_OGS_INTO_PLANE_PRICE_ADV definition
+  public
+  final
+  create private .
+
+public section.
+
+  constants GC_EMAIL_REPORT type PROGRAMM value 'ZDOGSR_PLANE_PRICE_ADV_EMAIL' ##NO_TEXT.
+  class-data GV_REPORT_RUNNING_STATUS type BOOLEAN .
+
+  class-methods GET_INSTANCE
+    importing
+      !I_T_KUNNR type ZTKUNNR optional
+      !I_T_MATNR type ZTMATNR optional
+      !I_DATE type DATUM
+    returning
+      value(R_O_INSTANCE) type ref to ZCL_OGS_INTO_PLANE_PRICE_ADV .
+  methods PREPARE_ALV_HEADER
+    importing
+      !I_CUSTOMER type NAME1_GP optional
+    changing
+      !C_O_ALV_INSTANCE type ref to CL_SALV_TABLE .
+  methods PREPARE_ALV_FOOTER
+    changing
+      !C_O_ALV_INSTANCE type ref to CL_SALV_TABLE .
+  methods HANDLE_USER_COMMAND
+    for event ADDED_FUNCTION of CL_SALV_EVENTS_TABLE
+    importing
+      !E_SALV_FUNCTION .
+  methods CONVERT_SPOOL_INTO_PDF_FORMAT
+    returning
+      value(R_T_PDF_ATTACHMENT) type TTSMW0_SOLISTI1 .
+  methods SEND_EMAIL
+    importing
+      !I_T_PDF_ATTACHMENT type TTSMW0_SOLISTI1
+      !I_KUNNR type KUNNR
+      !I_DATE type DATAB
+    returning
+      value(R_EMAIL_SENT_STATUS) type BOOLEAN .
+  methods SIMULATE_DATA
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods CONFIRM_DATA
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods PREPARE_DATA_TO_DISP_AND_EMAIL .
+  methods CHG_COL_TEXT_CONFIRMATION_DATA
+    changing
+      !C_O_ALV_INSTANCE type ref to CL_SALV_TABLE .
+  methods FIELDCAT_FOR_CONFIRMATION_ALV
+    returning
+      value(R_T_FIELDCATALOG) type LVC_T_FCAT .
+protected section.
+private section.
+
+  types:
+    BEGIN OF ty_contracts,
+      vbeln TYPE vbak-vbeln,
+      kunnr TYPE vbak-kunnr,
+      knumv TYPE vbak-knumv,
+      vstel TYPE vbap-vstel,
+      matnr TYPE vbap-matnr,
+      vtext TYPE tvstt-vtext,
+      maktx TYPE makt-maktx,
+      name1 TYPE kna1-name1,
+    END OF ty_contracts .
+  types:
+    BEGIN OF ty_price_components,
+      knumv TYPE prcd_elements-knumv,
+      kschl TYPE prcd_elements-kschl,
+      vtext TYPE t685t-vtext,
+    END OF     ty_price_components .
+  types:
+    BEGIN OF ty_prc_comp_details,
+      kschl TYPE konh-kschl,
+      knumh TYPE konh-knumh,
+      datab TYPE konh-datab,
+      kbetr TYPE konp-kbetr,
+      konwa TYPE konp-konwa,
+      kpein TYPE konp-kpein,
+      kmein TYPE konp-kmein,
+    END OF ty_prc_comp_details .
+  types:
+    BEGIN OF ty_simulated_data,
+      vbeln  TYPE vbak-vbeln,
+      name1  TYPE kna1-name1,
+      vtext  TYPE tvstt-vtext,
+      maktx  TYPE makt-maktx,
+      kschl  TYPE konh-kschl,
+      vtext1 TYPE t685t-vtext,
+    END OF ty_simulated_data .
+  types:
+    BEGIN OF ty_email_address,
+      partner   TYPE but020-partner,
+      smtp_addr TYPE adr6-smtp_addr,
+    END OF ty_email_address .
+  types:
+    BEGIN OF ty_price_alv_fields,
+      kunnr TYPE kna1-kunnr,
+      base  TYPE boolean,
+      mop   TYPE boolean,
+      diff  TYPE boolean,
+      dac   TYPE boolean,
+      duty  TYPE boolean,
+      tax   TYPE boolean,
+    END OF ty_price_alv_fields .
+
+  data:
+    gs_t_contracts          TYPE STANDARD TABLE OF ty_contracts .
+  data:
+    gs_t_price_components   TYPE STANDARD TABLE OF ty_price_components .
+  data:
+    gs_t_prc_comp_price_dtl TYPE STANDARD TABLE OF ty_prc_comp_details .
+  data:
+    gs_t_simulated_data     TYPE STANDARD TABLE OF ty_simulated_data .
+  data:
+    gs_t_customers_email_address TYPE STANDARD TABLE OF ty_email_address .
+  data:
+    gs_t_price_alv_fields TYPE STANDARD TABLE OF ty_price_alv_fields .
+  class-data GO_INSTANCE type ref to ZCL_OGS_INTO_PLANE_PRICE_ADV .
+  constants GC_PICTURE_ID type BDS_TYPEID value 'ZENOC_LOGO' ##NO_TEXT.
+  class-data GT_KUNNR type ZTKUNNR .
+  class-data GT_MATNR type ZTMATNR .
+  class-data GV_DATE type DATUM .
+  constants GC_REPORT type PROGRAMM value 'ZDOGSR_INTO_PLANE_PRICE_ADVICE' ##NO_TEXT.
+  class-data GS_T_CONFIRMATION_ALV_DATA type ref to DATA .
+
+  methods DISPLAY_EXCHANGE_RATES .
+  methods GET_SPOOL_REQUEST_NO
+    returning
+      value(R_SPOOL_REQ_NO) type RSPOID .
+  methods PREPARE_EMAIL_SUBJECT
+    importing
+      !I_DATE type DATAB
+    returning
+      value(R_S_EMAIL_SUBJECT) type SODOCCHGI1 .
+  methods PREPARE_EMAIL_BODY
+    returning
+      value(R_T_EMAIL_BODY) type TTSMW0_SOLISTI1 .
+  methods PREPARE_PACKING_LIST
+    importing
+      !I_EMAIL_BODY_LINES type I
+      !I_EMAIL_ATTACHMENT_LINES type I
+    returning
+      value(R_T_PACKING_LIST) type SOPCKLSTI1_T .
+  methods GET_SIZE_OF_ATTACHMENT
+    importing
+      !I_EMAIL_BODY_LINES type I
+      !I_T_PDF_ATTACHMENT type TTSMW0_SOLISTI1
+      !I_S_EMAIL_SUBJECT type SODOCCHGI1
+    returning
+      value(R_S_ATTACHMENT_SIZE) type SODOCCHGI1 .
+  methods GET_EMAIL_RECEIVER
+    importing
+      !I_KUNNR type KUNNR
+    returning
+      value(R_T_EMAIL_RECEIVERS) type SOMLRECI1_T .
+  methods GET_SALES_ORGANIZATIONS
+    returning
+      value(R_T_SALES_ORGANIZATIONS) type ZONGS_TVARVC_RNG .
+  methods GET_DATA
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods COMPARE_AND_SIMULATE_DATA
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods DISPLAY_SIMULATED_DATA
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods CHG_COL_TEXT_SIMULATED_DATA
+    changing
+      !C_O_COLUMNS type ref to CL_SALV_COLUMNS .
+  methods SEND_CUSTOMER_WISE_EMAILS
+    importing
+      !I_CUSTOMER type NAME1_GP
+      !I_KUNNR type KUNNR
+      !I_EFFCT_FROM_DATE type DATUM
+    returning
+      value(R_EMAIL_SENT_STATUS) type CHAR4 .
+  methods GET_EMAIL_ADDRESS_OF_CUSTOMERS
+    importing
+      !I_T_CUSTOMERS like GS_T_CONTRACTS .
+  methods DISPLAY_DATA_IN_ALV
+    raising
+      ZCX_OGS_EXCEPTION_HANDLING .
+  methods GET_BASE_UNIT_FOR_CONVERSION
+    importing
+      !I_KNUMV type KNUMV
+    returning
+      value(R_BASE_UNIT) type KONWA .
+  methods CONVERT_PRICE
+    importing
+      !I_ACTUAL_UNIT type KONWA
+      !I_CONVERT_UNIT type KONWA
+      !I_PRICE type KBETR
+    returning
+      value(R_CONVERTED_PRICE) type KBETR .
+  methods SORT_ALV_DISPLAY_ON_CUSTOMER
+    changing
+      !C_O_ALV_INSTANCE type ref to CL_SALV_TABLE .
+  methods GET_FIXED_STARTING_COLUMNS
+    returning
+      value(R_T_FIELDCATALOG) type LVC_T_FCAT .
+  methods GET_FIXED_ENDING_COLUMNS
+    returning
+      value(R_T_FIELDCATALOG) type LVC_T_FCAT .
+  methods GET_DYNAMIC_MIDDLE_COLUMNS
+    importing
+      !I_T_CONTRACTS like GS_T_CONTRACTS optional
+      !I_ALL_PRICE_COMPONENTS type BOOLEAN
+      !I_KUNNR type KUNNR optional
+    returning
+      value(R_T_FIELDCATALOG) type LVC_T_FCAT .
+  methods FIELDCAT_FOR_CUSTOMER_EMAIL
+    importing
+      !I_T_CONTRACTS like GS_T_CONTRACTS
+      !I_KUNNR type KUNNR
+    returning
+      value(R_T_FIELDCATALOG) type LVC_T_FCAT .
+  methods SET_EMAIL_SENT_STATUS
+    importing
+      !I_KUNNR type KUNNR
+      !I_VSTEL type VSTEL
+      !I_EMAIL_SENT_STATUS type CHAR4
+    changing
+      !C_T_CONFIRM_ALV_DATA type ANY TABLE .
+  methods SEND_EMAIL_TO_CUSTOMER
+    importing
+      !I_T_CONFIRM_DATA_EMAIL type ANY TABLE
+      !I_KUNNR type KUNNR
+      !I_CUSTOMER type NAME1_GP
+      !I_EFFECTIVE_DATE type DATUM
+      !I_VSTEL type VSTEL
+    changing
+      !C_T_CONFIRM_ALV_DATA type ANY TABLE .
+ENDCLASS.
+
+
+
+CLASS ZCL_OGS_INTO_PLANE_PRICE_ADV IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->CHG_COL_TEXT_CONFIRMATION_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [<-->] C_O_ALV_INSTANCE               TYPE REF TO CL_SALV_TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD chg_col_text_confirmation_data.
+
+    DATA:
+      lv_short_text  TYPE scrtext_s,
+      lv_medium_text TYPE scrtext_m,
+      lv_long_text   TYPE scrtext_l,
+      lv_column      TYPE lvc_fname,
+      lo_columns     TYPE REF TO cl_salv_columns,
+      lo_column      TYPE REF TO cl_salv_column.
+
+    lo_columns = c_o_alv_instance->get_columns( ).
+
+*Customer
+    TRY .
+        CLEAR:lv_short_text.
+        lo_column = lo_columns->get_column( 'KUNNR' ).
+        lv_short_text = TEXT-049.
+        lo_column->set_long_text( TEXT-049 ).
+        lo_column->set_medium_text( TEXT-049 ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Customer Name
+    TRY .
+        lo_column = lo_columns->get_column( 'NAME1' ).
+        lo_column->set_long_text( TEXT-019 ).
+        lo_column->set_medium_text( TEXT-019 ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Airport
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'VSTEL' ).
+        lv_short_text = TEXT-021.
+        lv_medium_text = TEXT-021.
+        lv_long_text = TEXT-021.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Airport Name
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'VTEXT' ).
+        lv_short_text = TEXT-050.
+        lv_medium_text = TEXT-050.
+        lv_long_text = TEXT-050.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Product.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'MAKTX' ).
+        lv_short_text = TEXT-022.
+        lv_medium_text = TEXT-022.
+        lv_long_text = TEXT-022.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Base Price.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'ZBFR' ).
+        lv_medium_text = TEXT-033.
+        lv_long_text = TEXT-033.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Means of Platts.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'ZMOP' ).
+        lv_medium_text = TEXT-034.
+        lv_long_text = TEXT-034.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Price Components Column Headings.
+    IF gs_t_price_components IS INITIAL.
+      IMPORT gs_t_price_components TO gs_t_price_components FROM MEMORY ID 'PRICE'.
+      FREE MEMORY ID 'PRICE'.
+    ENDIF.
+
+    LOOP AT gs_t_price_components ASSIGNING FIELD-SYMBOL(<lfs_price_comp>).
+
+      TRY .
+          CLEAR lv_column.
+          lv_column = <lfs_price_comp>-kschl.
+          lo_column = lo_columns->get_column( lv_column ).
+
+          CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+          lv_long_text = <lfs_price_comp>-vtext.
+          lo_column->set_long_text( lv_long_text  ).
+
+        CATCH cx_salv_not_found.
+      ENDTRY.
+
+    ENDLOOP.
+
+*Total Selling price.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'TOTAL' ).
+        lv_short_text = TEXT-043.
+        lv_medium_text = TEXT-039.
+        lv_long_text = TEXT-039.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Price Unit.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'KONWA' ).
+        lv_short_text = TEXT-040.
+        lv_medium_text = TEXT-040.
+        lv_long_text = TEXT-040.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Effective Date.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'DATAB' ).
+        lv_medium_text = TEXT-041.
+        lv_long_text = TEXT-041.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Email Sent.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lo_column = lo_columns->get_column( 'EMAIL_SENT' ).
+        lv_short_text = TEXT-042.
+        lv_medium_text = TEXT-042.
+        lv_long_text = TEXT-042.
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->CHG_COL_TEXT_SIMULATED_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [<-->] C_O_COLUMNS                    TYPE REF TO CL_SALV_COLUMNS
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD chg_col_text_simulated_data.
+
+    DATA:
+      lv_short_text  TYPE scrtext_s,
+      lv_medium_text TYPE scrtext_m,
+      lv_long_text   TYPE scrtext_l,
+      lo_column      TYPE REF TO cl_salv_column.
+
+*Contract.
+    TRY.
+        lo_column = c_o_columns->get_column( 'VBELN' ).
+        lo_column->set_long_text( TEXT-020 ).
+        lo_column->set_medium_text( TEXT-020 ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Customer.
+    TRY .
+        CLEAR:lv_short_text.
+        lv_short_text = TEXT-019.
+        lo_column = c_o_columns->get_column( 'NAME1' ).
+        lo_column->set_long_text( TEXT-019 ).
+        lo_column->set_medium_text( TEXT-019 ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Airport.
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text,lv_long_text.
+        lv_short_text = TEXT-021.
+        lv_medium_text = TEXT-021.
+        lv_long_text = TEXT-021.
+        lo_column = c_o_columns->get_column( 'VTEXT' ).
+        lo_column->set_long_text( lv_long_text  ).
+        lo_column->set_medium_text( lv_medium_text ).
+        lo_column->set_short_text( lv_short_text ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Product.
+    TRY .
+        lo_column = c_o_columns->get_column( 'MAKTX' ).
+        lo_column->set_long_text( TEXT-022 ).
+        lo_column->set_medium_text( TEXT-022 ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Pricing Element
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text.
+        lv_short_text = TEXT-024.
+        lv_medium_text = TEXT-023.
+        lo_column = c_o_columns->get_column( 'KSCHL' ).
+        lo_column->set_short_text( lv_short_text ).
+        lo_column->set_long_text( TEXT-023 ).
+        lo_column->set_medium_text( lv_medium_text  ).
+        lo_column->set_output_length( 20 ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+*Price Element Description
+    TRY .
+        CLEAR:lv_short_text,lv_medium_text.
+        lv_short_text = TEXT-046.
+        lv_medium_text = TEXT-045.
+        lo_column = c_o_columns->get_column( 'VTEXT1' ).
+        lo_column->set_short_text( lv_short_text ).
+        lo_column->set_medium_text( lv_medium_text  ).
+        lo_column->set_long_text( TEXT-045 ).
+      CATCH cx_salv_not_found.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->COMPARE_AND_SIMULATE_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD compare_and_simulate_data.
+
+    DATA:lv_var TYPE i.
+
+    CLEAR gs_t_simulated_data.
+
+*Get unique customers.
+    DATA(lt_customers) = gs_t_contracts.
+    SORT lt_customers BY kunnr.
+    DELETE ADJACENT DUPLICATES FROM lt_customers COMPARING kunnr.
+
+    SORT gs_t_contracts BY kunnr.
+    SORT gs_t_price_components BY knumv.
+
+    LOOP AT lt_customers ASSIGNING FIELD-SYMBOL(<lfs_customer>).
+
+      READ TABLE gs_t_contracts ASSIGNING FIELD-SYMBOL(<lfs_contract>)
+      WITH KEY kunnr = <lfs_customer>-kunnr.
+      IF sy-subrc EQ 0.
+
+        LOOP AT gs_t_contracts FROM sy-tabix ASSIGNING <lfs_contract>.
+
+          IF <lfs_contract>-kunnr NE <lfs_customer>-kunnr.
+            EXIT.
+          ENDIF.
+
+          READ TABLE gs_t_price_components ASSIGNING FIELD-SYMBOL(<lfs_price_comp>)
+          WITH KEY knumv = <lfs_contract>-knumv.
+          IF sy-subrc EQ 0.
+
+            LOOP AT gs_t_price_components FROM sy-tabix ASSIGNING <lfs_price_comp>.
+
+              IF <lfs_price_comp>-knumv NE <lfs_contract>-knumv.
+                EXIT.
+              ENDIF.
+
+              IF line_exists( gs_t_prc_comp_price_dtl[ kschl = <lfs_price_comp>-kschl ] ).
+                IF lv_var IS NOT INITIAL.
+                  CLEAR lv_var.
+                ENDIF.
+              ELSE.
+                APPEND INITIAL LINE TO gs_t_simulated_data ASSIGNING FIELD-SYMBOL(<lfs_simulated_data>).
+                IF <lfs_simulated_data> IS ASSIGNED.
+                  <lfs_simulated_data>-vbeln = <lfs_contract>-vbeln.
+                  <lfs_simulated_data>-name1 = <lfs_customer>-name1.
+                  <lfs_simulated_data>-vtext = <lfs_contract>-vtext.
+                  <lfs_simulated_data>-maktx = <lfs_contract>-maktx.
+                  <lfs_simulated_data>-kschl = <lfs_price_comp>-kschl.
+                  <lfs_simulated_data>-vtext1 = <lfs_price_comp>-vtext.
+                ENDIF.
+                EXIT.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+
+        ENDLOOP.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->CONFIRM_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD confirm_data.
+
+*Get data for confirmation.
+    get_data( ).
+
+*Prepare customer wise data for ALV display and email.
+    prepare_data_to_disp_and_email( ).
+
+*Display data for all customers in ALV.
+    display_data_in_alv( ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->CONVERT_PRICE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_ACTUAL_UNIT                  TYPE        KONWA
+* | [--->] I_CONVERT_UNIT                 TYPE        KONWA
+* | [--->] I_PRICE                        TYPE        KBETR
+* | [<-()] R_CONVERTED_PRICE              TYPE        KBETR
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD convert_price.
+
+    CLEAR r_converted_price.
+    CALL FUNCTION 'CONVERT_TO_FOREIGN_CURRENCY'
+      EXPORTING
+        client           = sy-mandt
+        date             = sy-datum
+        foreign_currency = i_convert_unit
+        local_amount     = i_price
+        local_currency   = i_actual_unit
+      IMPORTING
+        foreign_amount   = r_converted_price
+      EXCEPTIONS
+        no_rate_found    = 1
+        overflow         = 2
+        no_factors_found = 3
+        no_spread_found  = 4
+        derived_2_times  = 5
+        OTHERS           = 6.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->CONVERT_SPOOL_INTO_PDF_FORMAT
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_PDF_ATTACHMENT             TYPE        TTSMW0_SOLISTI1
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD convert_spool_into_pdf_format.
+
+    DATA:
+      lt_pdf_output TYPE  tline_tty.
+
+    CLEAR r_t_pdf_attachment.
+
+    DATA(lv_spool_request_no) = get_spool_request_no( ) .
+    IF lv_spool_request_no IS NOT INITIAL.
+
+      CALL FUNCTION 'CONVERT_ABAPSPOOLJOB_2_PDF'
+        EXPORTING
+          src_spoolid              = lv_spool_request_no
+          no_dialog                = ''
+        TABLES
+          pdf                      = lt_pdf_output
+        EXCEPTIONS
+          err_no_abap_spooljob     = 1
+          err_no_spooljob          = 2
+          err_no_permission        = 3
+          err_conv_not_possible    = 4
+          err_bad_destdevice       = 5
+          user_cancelled           = 6
+          err_spoolerror           = 7
+          err_temseerror           = 8
+          err_btcjob_open_failed   = 9
+          err_btcjob_submit_failed = 10
+          err_btcjob_close_failed  = 11
+          OTHERS                   = 12.
+      IF sy-subrc EQ 0.
+
+        CALL FUNCTION 'SX_TABLE_LINE_WIDTH_CHANGE'
+          EXPORTING
+            line_width_src              = 134
+            line_width_dst              = 255
+          TABLES
+            content_in                  = lt_pdf_output
+            content_out                 = r_t_pdf_attachment
+          EXCEPTIONS
+            err_line_width_src_too_long = 1
+            err_line_width_dst_too_long = 2
+            err_conv_failed             = 3
+            OTHERS                      = 4.
+        IF sy-subrc NE 0.
+          RETURN.
+        ENDIF.
+
+      ELSE.
+        RETURN.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->DISPLAY_DATA_IN_ALV
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD display_data_in_alv.
+
+    FIELD-SYMBOLS:<lfs_t_confirm_alv_data> TYPE ANY TABLE.
+
+    DATA:
+      lo_alv_instance TYPE REF TO cl_salv_table,
+      lo_events       TYPE REF TO cl_salv_events_table,
+      ls_message      TYPE scx_t100key.
+
+    CLEAR lo_alv_instance.
+
+    ASSIGN gs_t_confirmation_alv_data->* TO <lfs_t_confirm_alv_data>.
+
+    IF <lfs_t_confirm_alv_data> IS NOT INITIAL.
+
+*Generate ALV instance.
+      TRY.
+          cl_salv_table=>factory(
+            IMPORTING
+              r_salv_table = lo_alv_instance
+            CHANGING
+              t_table      = <lfs_t_confirm_alv_data> ).
+
+*Prepare PF Status in ALV.
+          lo_alv_instance->set_screen_status(
+           report = gc_report
+           pfstatus = 'STANDARD' ).
+
+*Prepare ALV header.
+          prepare_alv_header(
+            CHANGING
+              c_o_alv_instance = lo_alv_instance ).
+
+*Prepare ALV Footer.
+          prepare_alv_footer(
+            CHANGING
+              c_o_alv_instance = lo_alv_instance ).
+
+*Handle user command of custom added functions.
+          CLEAR lo_events.
+          lo_events = lo_alv_instance->get_event( ).
+          SET HANDLER handle_user_command FOR lo_events.
+
+*Change column headings.
+          chg_col_text_confirmation_data(
+          CHANGING
+            c_o_alv_instance = lo_alv_instance ).
+
+*Sort ALV display on Customer field.
+          sort_alv_display_on_customer(
+          CHANGING
+            c_o_alv_instance = lo_alv_instance ).
+
+*Display ALV.
+          lo_alv_instance->display( ).
+
+        CATCH cx_salv_msg.
+      ENDTRY.
+    ELSE.
+      CLEAR ls_message.
+      ls_message-msgid = 'ZONGS_MSG'.
+      ls_message-msgno = '023'.
+      RAISE EXCEPTION TYPE zcx_ogs_exception_handling EXPORTING textid = ls_message.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->DISPLAY_EXCHANGE_RATES
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD display_exchange_rates.
+
+    DATA:
+      lo_alv       TYPE REF TO cl_salv_table,
+      lo_cols      TYPE REF TO cl_salv_columns_table,
+      lo_col       TYPE REF TO cl_salv_column_table,
+      lo_functions TYPE REF TO cl_salv_functions_list,
+      lo_columns   TYPE REF TO cl_salv_columns.
+
+    SELECT *
+    FROM tcurr
+    INTO TABLE @DATA(lt_data) BYPASSING BUFFER.
+    IF sy-subrc EQ 0.
+
+      TRY.
+          cl_salv_table=>factory(
+             IMPORTING
+               r_salv_table = lo_alv
+             CHANGING
+               t_table       = lt_data ).
+
+*Enable standard functions.
+          lo_functions = lo_alv->get_functions( ).
+          lo_functions->set_all( abap_true ).
+
+*Enable columns width optimization.
+          lo_columns = lo_alv->get_columns( ).
+          lo_columns->set_optimize( abap_true ).
+
+*Set popup screen attributes.
+          lo_alv->set_screen_popup(
+           start_column = 1
+           end_column   = 100
+           start_line   = 1
+           end_line     = 20 ).
+
+*Hide MANDT field.
+          lo_cols = lo_alv->get_columns( ).
+
+          TRY.
+              lo_col ?= lo_cols->get_column( 'MANDT' ).
+              lo_col->set_visible( value = if_salv_c_bool_sap=>false ).
+            CATCH cx_salv_not_found.
+          ENDTRY.
+
+*Display alv in popup screen.
+          lo_alv->display( ).
+
+        CATCH cx_salv_msg.
+      ENDTRY.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->DISPLAY_SIMULATED_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD display_simulated_data.
+
+    DATA:
+      lo_alv       TYPE REF TO cl_salv_table,
+      lo_functions TYPE REF TO cl_salv_functions_list,
+      lo_columns   TYPE REF TO cl_salv_columns,
+      lo_display   TYPE REF TO cl_salv_display_settings,
+      ls_message   TYPE scx_t100key.
+
+    IF gs_t_simulated_data IS NOT INITIAL.
+
+      TRY.
+          cl_salv_table=>factory(
+             IMPORTING
+               r_salv_table = lo_alv
+             CHANGING
+               t_table       = gs_t_simulated_data ).
+
+*Enable standard functions.
+          lo_functions = lo_alv->get_functions( ).
+          lo_functions->set_all( abap_true ).
+
+*Set Title.
+          lo_display = lo_alv->get_display_settings( ).
+          lo_display->set_list_header( TEXT-018 ).
+
+*Enable columns width optimization.
+          lo_columns = lo_alv->get_columns( ).
+          lo_columns->set_optimize( abap_true ).
+
+*Set Columns heading.
+          chg_col_text_simulated_data(
+            CHANGING
+              c_o_columns = lo_columns ).
+
+*Set popup screen attributes.
+          lo_alv->set_screen_popup(
+           start_column = 1
+           end_column   = 100
+           start_line   = 1
+           end_line     = 20 ).
+
+*Display alv in popup screen.
+          lo_alv->display( ).
+
+        CATCH cx_salv_msg.
+      ENDTRY.
+
+    ELSE.
+
+      CLEAR ls_message.
+      ls_message-msgid = 'ZONGS_MSG'.
+      ls_message-msgno = '021'.
+      RAISE EXCEPTION TYPE zcx_ogs_exception_handling EXPORTING textid = ls_message.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->FIELDCAT_FOR_CONFIRMATION_ALV
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_FIELDCATALOG               TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD fieldcat_for_confirmation_alv.
+
+    CLEAR r_t_fieldcatalog.
+
+    APPEND LINES OF get_fixed_starting_columns( ) TO r_t_fieldcatalog.
+
+    APPEND LINES OF get_dynamic_middle_columns( i_all_price_components = abap_true ) TO r_t_fieldcatalog.
+
+    APPEND LINES OF get_fixed_ending_columns( ) TO r_t_fieldcatalog.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->FIELDCAT_FOR_CUSTOMER_EMAIL
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_CONTRACTS                  LIKE        GS_T_CONTRACTS
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [<-()] R_T_FIELDCATALOG               TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD fieldcat_for_customer_email.
+
+    CLEAR r_t_fieldcatalog.
+
+    APPEND LINES OF get_fixed_starting_columns( ) TO r_t_fieldcatalog.
+
+    APPEND LINES OF get_dynamic_middle_columns( EXPORTING i_t_contracts = i_t_contracts
+                                                                                                   i_all_price_components = abap_false
+                                                                                                   i_kunnr = i_kunnr ) TO r_t_fieldcatalog.
+
+    APPEND LINES OF get_fixed_ending_columns( ) TO r_t_fieldcatalog.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_BASE_UNIT_FOR_CONVERSION
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_KNUMV                        TYPE        KNUMV
+* | [<-()] R_BASE_UNIT                    TYPE        KONWA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_base_unit_for_conversion.
+
+    CLEAR r_base_unit.
+    IF line_exists( gs_t_price_components[ knumv = i_knumv
+                                                             kschl    = 'ZBPR' ] ).  "Base price
+
+      IF line_exists( gs_t_prc_comp_price_dtl[ kschl =  'ZBPR' ] ).
+        r_base_unit = gs_t_prc_comp_price_dtl[ kschl =  'ZBPR' ]-konwa.
+      ENDIF.
+
+    ELSEIF line_exists( gs_t_price_components[ knumv = i_knumv
+                                                                     kschl    = 'ZMOP' ] ).  "Mean of Platts
+
+      IF line_exists( gs_t_prc_comp_price_dtl[ kschl =  'ZMOP' ] ).
+        r_base_unit = gs_t_prc_comp_price_dtl[ kschl =  'ZMOP' ]-konwa.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_data.
+
+    DATA:ls_message TYPE scx_t100key.
+
+    CLEAR:gs_t_contracts,
+             gs_t_price_components,
+             gs_t_prc_comp_price_dtl.
+
+*Get sales organizations from tvarvc table.
+    DATA(lt_sales_org) = get_sales_organizations( ).
+
+    IF lt_sales_org IS NOT INITIAL.
+
+*Get customers.
+      SELECT kunnr
+      FROM knvp
+      INTO TABLE @DATA(lt_kunnr)
+      WHERE vkorg IN @lt_sales_org AND
+                  kunnr IN @gt_kunnr AND
+                  parvw EQ 'AG'.
+      IF sy-subrc EQ 0.
+
+        SORT lt_kunnr BY kunnr.
+        DELETE ADJACENT DUPLICATES FROM lt_kunnr COMPARING kunnr.
+
+*Get valid contracts.
+        SELECT
+                  a~vbeln,
+                  a~kunnr,
+                  a~knumv,
+                  b~vstel,
+                  b~matnr,
+                  c~vtext,
+                  d~maktx,
+                  e~name1
+        FROM vbak AS a INNER JOIN vbap AS b ON a~vbeln = b~vbeln
+                                  LEFT OUTER JOIN tvstt AS c ON b~vstel = c~vstel
+                                  LEFT OUTER JOIN makt AS d ON b~matnr = d~matnr
+                                  LEFT OUTER JOIN kna1 AS e ON a~kunnr = e~kunnr BYPASSING BUFFER
+        INTO TABLE @gs_t_contracts
+        FOR ALL ENTRIES IN @lt_kunnr
+        WHERE a~kunnr EQ @lt_kunnr-kunnr AND
+                    a~vbtyp EQ 'G' AND
+                    a~guebg <= @sy-datum AND
+                    a~gueen >= @sy-datum AND
+                    b~matnr IN @gt_matnr AND
+                    c~spras EQ @sy-langu AND
+                    d~spras EQ @sy-langu AND
+                    e~spras EQ @sy-langu.
+        IF sy-subrc EQ 0.
+
+          SORT gs_t_contracts BY kunnr vstel matnr.
+          DELETE ADJACENT DUPLICATES FROM gs_t_contracts COMPARING kunnr vstel matnr.
+
+          DATA(lt_contracts_temp) = gs_t_contracts.
+          SORT lt_contracts_temp BY knumv.
+          DELETE ADJACENT DUPLICATES FROM lt_contracts_temp COMPARING knumv.
+
+*Get price components
+          SELECT a~knumv,
+                      a~kschl,
+                      b~vtext
+          INTO TABLE @gs_t_price_components
+          FROM prcd_elements AS a LEFT OUTER JOIN t685t AS b ON a~kschl = b~kschl BYPASSING BUFFER
+          FOR ALL ENTRIES IN @lt_contracts_temp
+          WHERE a~knumv EQ @lt_contracts_temp-knumv AND
+                      b~spras EQ @sy-langu.
+          IF sy-subrc EQ 0.
+
+*Get price components price details
+            SELECT a~kschl,
+                        a~knumh,
+                        a~datab,
+                        b~kbetr,
+                        b~konwa,
+                        b~kpein,
+                        b~kmein
+            FROM konh AS a INNER JOIN konp AS b ON a~knumh = b~knumh
+            INTO TABLE @gs_t_prc_comp_price_dtl
+            FOR ALL ENTRIES IN @gs_t_price_components
+            WHERE a~kschl = @gs_t_price_components-kschl AND
+                        a~datab <= @gv_date AND
+                        a~datbi >= @gv_date.
+            IF sy-subrc EQ 0.
+              SORT gs_t_prc_comp_price_dtl BY kschl.
+              DELETE ADJACENT DUPLICATES FROM gs_t_prc_comp_price_dtl COMPARING kschl.
+            ENDIF.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ELSE.
+      CLEAR ls_message.
+      ls_message-msgid = 'ZONGS_MSG'.
+      ls_message-msgno = '022'.
+      RAISE EXCEPTION TYPE zcx_ogs_exception_handling EXPORTING textid = ls_message.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_DYNAMIC_MIDDLE_COLUMNS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_CONTRACTS                  LIKE        GS_T_CONTRACTS(optional)
+* | [--->] I_ALL_PRICE_COMPONENTS         TYPE        BOOLEAN
+* | [--->] I_KUNNR                        TYPE        KUNNR(optional)
+* | [<-()] R_T_FIELDCATALOG               TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_dynamic_middle_columns.
+
+    CLEAR r_t_fieldcatalog.
+
+    IF i_all_price_components EQ abap_false.
+
+*Get contracts for one customer.
+      DATA(lt_contracts) = i_t_contracts.
+      DELETE lt_contracts WHERE kunnr NE i_kunnr.
+
+      LOOP AT lt_contracts ASSIGNING FIELD-SYMBOL(<lfs_contract>).
+
+        DATA(lt_price_components) = gs_t_price_components.
+        DELETE lt_price_components WHERE knumv NE <lfs_contract>-knumv.
+        DELETE lt_price_components WHERE kschl EQ 'ZBFR' OR
+                                                                 kschl EQ 'ZMOP'.
+
+        LOOP AT lt_price_components ASSIGNING FIELD-SYMBOL(<lfs_price_comp>).
+          APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING FIELD-SYMBOL(<lfs_fieldcatalog>).
+          IF <lfs_fieldcatalog> IS ASSIGNED.
+            <lfs_fieldcatalog>-fieldname = <lfs_price_comp>-kschl.
+            <lfs_fieldcatalog>-coltext = <lfs_price_comp>-vtext.
+            <lfs_fieldcatalog>-datatype = 'CURR'.
+
+            DATA(lv_length) = strlen( <lfs_fieldcatalog>-coltext ).
+            <lfs_fieldcatalog>-outputlen = lv_length.
+          ENDIF.
+        ENDLOOP.
+
+      ENDLOOP.
+
+    ELSE.
+
+      LOOP AT gs_t_price_components ASSIGNING <lfs_price_comp>.
+        APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+        IF <lfs_fieldcatalog> IS ASSIGNED.
+          <lfs_fieldcatalog>-fieldname = <lfs_price_comp>-kschl.
+          <lfs_fieldcatalog>-coltext = <lfs_price_comp>-vtext.
+          <lfs_fieldcatalog>-datatype = 'CURR'.
+
+          lv_length = strlen( <lfs_fieldcatalog>-coltext ).
+          <lfs_fieldcatalog>-outputlen = lv_length.
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+    SORT r_t_fieldcatalog BY fieldname.
+    DELETE ADJACENT DUPLICATES FROM r_t_fieldcatalog COMPARING fieldname.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_EMAIL_ADDRESS_OF_CUSTOMERS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_CUSTOMERS                  LIKE        GS_T_CONTRACTS
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_email_address_of_customers.
+
+    IF i_t_customers IS NOT INITIAL.
+      SELECT
+                a~partner,
+                b~smtp_addr
+      INTO TABLE @DATA(lt_email_address)
+      FROM but020 AS a INNER JOIN adr6 AS b ON a~addrnumber = b~addrnumber
+      FOR ALL ENTRIES IN @i_t_customers
+      WHERE a~partner EQ @i_t_customers-kunnr.
+      IF sy-subrc EQ 0.
+        gs_t_customers_email_address = lt_email_address.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_EMAIL_RECEIVER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [<-()] R_T_EMAIL_RECEIVERS            TYPE        SOMLRECI1_T
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_email_receiver.
+
+    CLEAR r_t_email_receivers.
+
+*Get email address of Customer.
+    IF line_exists( gs_t_customers_email_address[ partner = i_kunnr ] ).
+      DATA(lv_email_address) = gs_t_customers_email_address[ partner = i_kunnr ]-smtp_addr.
+    ENDIF.
+
+    IF lv_email_address IS NOT INITIAL.
+      APPEND INITIAL LINE TO r_t_email_receivers ASSIGNING FIELD-SYMBOL(<lfs_email_receiver>).
+      IF <lfs_email_receiver> IS ASSIGNED.
+        <lfs_email_receiver>-rec_type   = 'U'.
+        <lfs_email_receiver>-receiver   = lv_email_address.
+        <lfs_email_receiver>-com_type   = 'INT'.
+        <lfs_email_receiver>-notif_del  = abap_true.
+        <lfs_email_receiver>-notif_ndel = abap_true.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_FIXED_ENDING_COLUMNS
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_FIELDCATALOG               TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_fixed_ending_columns.
+
+    CLEAR r_t_fieldcatalog.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING FIELD-SYMBOL(<lfs_fieldcatalog>).
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'TOTAL'.
+      <lfs_fieldcatalog>-datatype = 'CURR'.
+      <lfs_fieldcatalog>-outputlen = 20.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'KONWA'.
+      <lfs_fieldcatalog>-datatype = 'CUKY'.
+      <lfs_fieldcatalog>-outputlen = 10.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'DATAB'.
+      <lfs_fieldcatalog>-datatype = 'DATS'.
+      <lfs_fieldcatalog>-outputlen = 15.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'EMAIL_SENT'.
+      <lfs_fieldcatalog>-datatype = 'ICON_D'.
+      <lfs_fieldcatalog>-outputlen = 10.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_FIXED_STARTING_COLUMNS
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_FIELDCATALOG               TYPE        LVC_T_FCAT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_fixed_starting_columns.
+
+    CLEAR r_t_fieldcatalog.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING FIELD-SYMBOL(<lfs_fieldcatalog>).
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'KUNNR'.
+      <lfs_fieldcatalog>-datatype = 'CHAR'.
+      <lfs_fieldcatalog>-outputlen = 10.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'VSTEL'.
+      <lfs_fieldcatalog>-datatype = 'CHAR'.
+      <lfs_fieldcatalog>-outputlen = 8.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'NAME1'.
+      <lfs_fieldcatalog>-datatype = 'CHAR'.
+      <lfs_fieldcatalog>-outputlen = 30.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'VTEXT'.
+      <lfs_fieldcatalog>-datatype = 'CHAR'.
+      <lfs_fieldcatalog>-outputlen = 30.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'MAKTX'.
+      <lfs_fieldcatalog>-datatype = 'CHAR'.
+      <lfs_fieldcatalog>-outputlen = 40.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'ZBFR'.
+      <lfs_fieldcatalog>-datatype = 'CURR'.
+
+      IF line_exists( gs_t_price_components[ kschl = 'ZBFR' ] ).
+        <lfs_fieldcatalog>-coltext = gs_t_price_components[ kschl = 'ZBFR' ]-vtext.
+        DATA(lv_length) = strlen( <lfs_fieldcatalog>-coltext ).
+        <lfs_fieldcatalog>-outputlen = lv_length.
+      ELSE.
+        <lfs_fieldcatalog>-outputlen = 10.
+      ENDIF.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_fieldcatalog ASSIGNING <lfs_fieldcatalog>.
+    IF <lfs_fieldcatalog> IS ASSIGNED.
+      <lfs_fieldcatalog>-fieldname = 'ZMOP'.
+      <lfs_fieldcatalog>-datatype = 'CURR'.
+
+      IF line_exists( gs_t_price_components[ kschl = 'ZMOP' ] ).
+        <lfs_fieldcatalog>-coltext = gs_t_price_components[ kschl = 'ZMOP' ]-vtext.
+        lv_length = strlen( <lfs_fieldcatalog>-coltext ).
+        <lfs_fieldcatalog>-outputlen = lv_length.
+      ELSE.
+        <lfs_fieldcatalog>-outputlen = 15.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Static Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV=>GET_INSTANCE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_KUNNR                      TYPE        ZTKUNNR(optional)
+* | [--->] I_T_MATNR                      TYPE        ZTMATNR(optional)
+* | [--->] I_DATE                         TYPE        DATUM
+* | [<-()] R_O_INSTANCE                   TYPE REF TO ZCL_OGS_INTO_PLANE_PRICE_ADV
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_instance.
+
+    CLEAR:
+    gt_kunnr,
+    gt_matnr,
+    gv_date.
+
+    IF go_instance IS NOT BOUND.
+      go_instance =  NEW #( ).
+      r_o_instance = go_instance.
+    ELSE.
+      r_o_instance = go_instance.
+    ENDIF.
+
+    gt_kunnr = i_t_kunnr.
+    gt_matnr = i_t_matnr.
+    gv_date = i_date.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_SALES_ORGANIZATIONS
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_SALES_ORGANIZATIONS        TYPE        ZONGS_TVARVC_RNG
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_sales_organizations.
+
+    CLEAR r_t_sales_organizations.
+
+    SELECT
+    type,
+    low,
+    high
+    FROM tvarvc
+    INTO TABLE @DATA(lt_data)
+    WHERE name EQ 'ZONGSAVIATION_VKORG'.
+    IF sy-subrc EQ 0.
+
+      LOOP AT lt_data ASSIGNING FIELD-SYMBOL(<lfs_data>).
+        APPEND INITIAL LINE TO r_t_sales_organizations ASSIGNING FIELD-SYMBOL(<lfs_sales_org>).
+        IF <lfs_sales_org> IS ASSIGNED.
+          <lfs_sales_org>-sign = 'I'.
+          <lfs_sales_org>-low  = <lfs_data>-low.
+          <lfs_sales_org>-high = <lfs_data>-high.
+
+          IF <lfs_sales_org>-high IS INITIAL.
+            <lfs_sales_org>-option = 'EQ'.
+          ELSE.
+            <lfs_sales_org>-option = 'BT'.
+          ENDIF.
+
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_SIZE_OF_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_EMAIL_BODY_LINES             TYPE        I
+* | [--->] I_T_PDF_ATTACHMENT             TYPE        TTSMW0_SOLISTI1
+* | [--->] I_S_EMAIL_SUBJECT              TYPE        SODOCCHGI1
+* | [<-()] R_S_ATTACHMENT_SIZE            TYPE        SODOCCHGI1
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_size_of_attachment.
+
+    CLEAR r_s_attachment_size.
+
+    r_s_attachment_size-obj_name = i_s_email_subject-obj_name.
+    r_s_attachment_size-obj_langu  = sy-langu.
+    r_s_attachment_size-obj_descr = i_s_email_subject-obj_descr.
+    IF line_exists( i_t_pdf_attachment[ i_email_body_lines ] ).
+      DATA(ls_pdf_attachment) = i_t_pdf_attachment[ i_email_body_lines ].
+      r_s_attachment_size-doc_size = ( i_email_body_lines - 1 ) * 255 + strlen( ls_pdf_attachment ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->GET_SPOOL_REQUEST_NO
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_SPOOL_REQ_NO                 TYPE        RSPOID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_spool_request_no.
+
+    DATA:lv_rq2name TYPE rspo2name.
+
+    CLEAR r_spool_req_no.
+
+    CONCATENATE gc_email_report+0(9) sy-uname+0(3) INTO lv_rq2name .
+    SELECT SINGLE MAX( rqident )
+    FROM tsp01
+    INTO @DATA(lv_spool_no)
+    WHERE rq2name = @lv_rq2name AND
+                rqowner = @sy-uname .
+    IF sy-subrc EQ 0.
+      r_spool_req_no = lv_spool_no.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->HANDLE_USER_COMMAND
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] E_SALV_FUNCTION                LIKE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD handle_user_command.
+
+    CASE e_salv_function.
+      WHEN 'EXRATE'.
+        display_exchange_rates( ).
+      WHEN 'QTYCONV'.
+        CALL TRANSACTION 'O3QCITEST'.
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_ALV_FOOTER
+* +-------------------------------------------------------------------------------------------------+
+* | [<-->] C_O_ALV_INSTANCE               TYPE REF TO CL_SALV_TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_alv_footer.
+
+    DATA:
+      lo_footer  TYPE REF TO cl_salv_form_layout_grid,
+      lo_f_label TYPE REF TO cl_salv_form_label,
+      lo_f_flow  TYPE REF TO cl_salv_form_layout_flow.
+
+    lo_footer = NEW #( ).
+    IF lo_footer IS BOUND.
+
+      lo_f_label = lo_footer->create_label( row = 2 column = 2 ).
+      lo_f_label->set_text( TEXT-013 ).
+
+      lo_f_label = lo_footer->create_label( row = 3 column = 2 ).
+      lo_f_label->set_text( TEXT-014 ).
+
+      lo_f_label = lo_footer->create_label( row = 4 column = 1 ).
+      lo_f_label->set_text( '' ).
+
+      lo_f_label = lo_footer->create_label( row = 5 column = 1 ).
+      lo_f_label->set_text( TEXT-004 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 6  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-005 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 7 column = 1 ).
+      lo_f_flow->create_text( text = TEXT-006 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 8 column = 1 ).
+      lo_f_flow->create_text( text = TEXT-007 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 9  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-008 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 10  column = 1 ).
+      lo_f_flow->create_text( text = '' ).
+
+      lo_f_flow = lo_footer->create_flow( row = 11  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-009 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 12  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-010 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 13  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-015 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 14  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-016 ).
+
+      lo_f_flow = lo_footer->create_flow( row = 15  column = 1 ).
+      lo_f_flow->create_text( text = TEXT-017 ).
+
+      c_o_alv_instance->set_end_of_list( lo_footer ).
+      c_o_alv_instance->set_end_of_list_print( lo_footer ).
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_ALV_HEADER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_CUSTOMER                     TYPE        NAME1_GP(optional)
+* | [<-->] C_O_ALV_INSTANCE               TYPE REF TO CL_SALV_TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_alv_header.
+
+    DATA:lv_customer TYPE kna1-name1.
+
+    DATA:
+      lo_top_element TYPE REF TO cl_salv_form_layout_grid,
+      lo_grid        TYPE REF TO cl_salv_form_layout_grid,
+      lo_picture     TYPE REF TO cl_salv_form_picture,
+      lo_textview    TYPE REF TO cl_salv_form_text.
+
+*Create top element with 2 columns to display data.
+    lo_top_element = NEW #( columns = 2 ).
+
+    IF lo_top_element IS BOUND.
+
+*Set ENOC logo
+      lo_grid = lo_top_element->create_grid( row = 1 column = 1 ).
+      lo_picture = NEW #( picture_id = gc_picture_id ).
+      lo_grid->set_element( EXPORTING row       = 1
+                                                            column    = 1
+                                                            r_element = lo_picture ).
+
+*Set required header fields.
+
+      lo_textview = lo_grid->create_text( row = 2 column  = 1
+                                                              text    = ''  ).
+
+      lo_textview = lo_grid->create_text( row = 3 column  = 1
+                                                              text    = TEXT-001  ).
+
+      lo_textview = lo_grid->create_text( row = 3 column  = 2
+                                                              text    = sy-datum  ).
+
+*Get customer name.
+      IMPORT i_customer TO lv_customer FROM MEMORY ID 'KUNNR'.
+      FREE MEMORY ID 'KUNNR'.
+
+      IF lv_customer IS NOT INITIAL.
+        lo_textview = lo_grid->create_text( row = 4 column  = 1
+                                                                text    = TEXT-002  ).
+
+        lo_textview = lo_grid->create_text( row = 4 column  = 2
+                                                                text    = lv_customer  ).
+
+        lo_textview = lo_grid->create_text( row = 5 column  = 1
+                                                                text    = TEXT-003  ).
+
+        lo_textview = lo_grid->create_text( row = 5 column  = 2
+                                                                text    = TEXT-025  ).
+
+      ELSE.
+        lo_textview = lo_grid->create_text( row = 4 column  = 1
+                                                              text    = TEXT-003  ).
+
+        lo_textview = lo_grid->create_text( row = 4 column  = 2
+                                                                text    = TEXT-025  ).
+      ENDIF.
+
+      lo_textview = lo_grid->create_text( row = 13 column  = 1
+                                                              text    = ''  ).
+
+      c_o_alv_instance->set_top_of_list( lo_top_element ).
+      c_o_alv_instance->set_top_of_list_print( lo_top_element ).
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_DATA_TO_DISP_AND_EMAIL
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_data_to_disp_and_email.
+
+    TYPES:BEGIN OF ty_date,
+            datab TYPE sy-datlo,
+          END OF ty_date.
+
+    FIELD-SYMBOLS:
+      <lfs_t_confirm_data_email> TYPE ANY TABLE,
+      <lfs_t_confirm_alv_data>   TYPE ANY TABLE,
+      <lfs_field>                TYPE any,
+      <lfs_confirm_data_alv>     TYPE any,
+      <lfs_confirm_data_email>   TYPE any.
+
+    DATA:
+      lv_total              TYPE kbetr,
+      lv_fieldname          TYPE lvc_fname,
+      lt_fieldcatalog_email TYPE lvc_t_fcat,
+      lt_fieldcatalog_alv   TYPE lvc_t_fcat,
+      lt_effective_date     TYPE STANDARD TABLE OF ty_date,
+      lt_effect_date        TYPE STANDARD TABLE OF ty_date.
+
+    DATA:
+      lo_table_alv          TYPE REF TO data,
+      lo_table_email        TYPE REF TO data,
+      ls_confirmation_alv   TYPE REF TO data,
+      ls_confirmation_email TYPE REF TO data.
+
+    CLEAR:gs_t_price_alv_fields,
+               gs_t_confirmation_alv_data.
+
+*--------------------------------------------------------------------------------------------------------------
+*Create dynamic table of confirmation data for ALV display
+*--------------------------------------------------------------------------------------------------------------
+    CLEAR lt_fieldcatalog_alv.
+    APPEND LINES OF fieldcat_for_confirmation_alv( ) TO lt_fieldcatalog_alv.
+
+*Generate dynamic internal table based on ALV field catalog
+    cl_alv_table_create=>create_dynamic_table(
+      EXPORTING
+        it_fieldcatalog = lt_fieldcatalog_alv
+      IMPORTING
+        ep_table = lo_table_alv ).
+
+    IF lo_table_alv IS BOUND.
+      ASSIGN lo_table_alv->* TO <lfs_t_confirm_alv_data>.
+      CREATE DATA ls_confirmation_alv LIKE LINE OF <lfs_t_confirm_alv_data>.
+      ASSIGN ls_confirmation_alv->* TO <lfs_confirm_data_alv>.
+    ENDIF.
+
+*Get unique customers.
+    DATA(lt_customers) = gs_t_contracts.
+    SORT lt_customers BY kunnr.
+    DELETE ADJACENT DUPLICATES FROM lt_customers COMPARING kunnr.
+
+*Get unique Airports.
+    DATA(lt_airports) = gs_t_contracts.
+    SORT lt_airports BY kunnr vstel.
+    DELETE ADJACENT DUPLICATES FROM lt_airports COMPARING kunnr vstel.
+    SORT lt_airports BY kunnr.
+
+*Get customers email address.
+    get_email_address_of_customers( lt_customers ).
+
+    SORT gs_t_contracts BY kunnr vstel.
+    SORT gs_t_price_components BY knumv.
+    SORT gs_t_prc_comp_price_dtl BY kschl.
+
+    LOOP AT lt_customers ASSIGNING FIELD-SYMBOL(<lfs_customer>).
+
+      READ TABLE lt_airports ASSIGNING FIELD-SYMBOL(<lfs_airport>)
+      WITH KEY kunnr = <lfs_customer>-kunnr.
+      IF sy-subrc EQ 0.
+
+        LOOP AT lt_airports FROM sy-tabix ASSIGNING <lfs_airport>.
+
+          IF <lfs_airport>-kunnr NE <lfs_customer>-kunnr.
+            EXIT.
+          ENDIF.
+
+*--------------------------------------------------------------------------------------------------------------
+*Create dynamic table of confirmation data for customer wise email
+*--------------------------------------------------------------------------------------------------------------
+          CLEAR lt_fieldcatalog_email.
+
+          APPEND LINES OF fieldcat_for_customer_email( EXPORTING  i_t_contracts = gs_t_contracts
+                                                                                                       i_kunnr = <lfs_customer>-kunnr ) TO lt_fieldcatalog_email.
+
+*Generate dynamic internal table based on ALV field catalog
+          cl_alv_table_create=>create_dynamic_table(
+            EXPORTING
+              it_fieldcatalog = lt_fieldcatalog_email
+            IMPORTING
+              ep_table = lo_table_email ).
+
+          IF lo_table_email IS BOUND.
+            ASSIGN lo_table_email->* TO <lfs_t_confirm_data_email>.
+            CREATE DATA ls_confirmation_email LIKE LINE OF <lfs_t_confirm_data_email>.
+            ASSIGN ls_confirmation_email->* TO <lfs_confirm_data_email>.
+          ENDIF.
+
+*--------------------------------------------------------------------------------------------------------------
+*Map values in dynamic table of confirmation data for customer wise email
+*--------------------------------------------------------------------------------------------------------------
+          READ TABLE gs_t_contracts ASSIGNING FIELD-SYMBOL(<lfs_contract>)
+          WITH KEY kunnr = <lfs_customer>-kunnr
+                        vstel  = <lfs_airport>-vstel.
+          IF sy-subrc EQ 0.
+
+            LOOP AT gs_t_contracts FROM sy-tabix ASSIGNING <lfs_contract>.
+
+              IF <lfs_contract>-kunnr NE <lfs_customer>-kunnr OR
+                 <lfs_contract>-vstel  NE <lfs_airport>-vstel.
+                EXIT.
+              ENDIF.
+
+*Check if Base Price or Mean of Platts exists or not.
+              DATA(lv_base_unit_of_conversion) =  get_base_unit_for_conversion( <lfs_contract>-knumv ) .
+              IF lv_base_unit_of_conversion IS NOT INITIAL.
+
+                INSERT INITIAL LINE INTO TABLE <lfs_t_confirm_alv_data> ASSIGNING <lfs_confirm_data_alv>.
+                IF <lfs_confirm_data_alv> IS ASSIGNED.
+
+*Assign data for ALV display.
+                  ASSIGN COMPONENT 'KUNNR' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = <lfs_customer>-kunnr.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'VSTEL' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = <lfs_airport>-vstel.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'NAME1' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = <lfs_customer>-name1.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'VTEXT' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = <lfs_contract>-vtext.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'MAKTX' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = <lfs_contract>-maktx.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'KONWA' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = lv_base_unit_of_conversion.
+                  ENDIF.
+
+*Assign data for email.
+                  INSERT INITIAL LINE INTO TABLE <lfs_t_confirm_data_email> ASSIGNING <lfs_confirm_data_email>.
+                  IF <lfs_confirm_data_email> IS ASSIGNED.
+
+                    ASSIGN COMPONENT 'KUNNR' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = <lfs_customer>-kunnr.
+                    ENDIF.
+
+                    ASSIGN COMPONENT 'VSTEL' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = <lfs_airport>-vstel.
+                    ENDIF.
+
+                    ASSIGN COMPONENT 'NAME1' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = <lfs_customer>-name1.
+                    ENDIF.
+
+                    ASSIGN COMPONENT 'VTEXT' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = <lfs_contract>-vtext.
+                    ENDIF.
+
+                    ASSIGN COMPONENT 'MAKTX' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = <lfs_contract>-maktx.
+                    ENDIF.
+
+                    ASSIGN COMPONENT 'KONWA' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                    IF <lfs_field> IS ASSIGNED.
+                      <lfs_field> = lv_base_unit_of_conversion.
+                    ENDIF.
+
+                  ENDIF.
+
+                ENDIF.
+
+*Map all other price components other than Base Price and Means of Platts.
+                CLEAR lv_total.
+
+*Read Price components.
+                READ TABLE gs_t_price_components ASSIGNING FIELD-SYMBOL(<lfs_price_comp>)
+                WITH KEY knumv = <lfs_contract>-knumv.
+                IF sy-subrc EQ 0.
+
+                  LOOP AT gs_t_price_components FROM sy-tabix ASSIGNING <lfs_price_comp>.
+
+                    IF <lfs_price_comp>-knumv NE <lfs_contract>-knumv.
+                      EXIT.
+                    ENDIF.
+
+                    lv_fieldname = <lfs_price_comp>-kschl.
+
+*Read Price values.
+                    READ TABLE gs_t_prc_comp_price_dtl ASSIGNING FIELD-SYMBOL(<lfs_prc_comp_price_dtl>)
+                    WITH KEY kschl = <lfs_price_comp>-kschl.
+                    IF sy-subrc EQ 0.
+
+                      LOOP AT gs_t_prc_comp_price_dtl FROM sy-tabix ASSIGNING <lfs_prc_comp_price_dtl>.
+
+                        IF <lfs_prc_comp_price_dtl>-kschl NE <lfs_price_comp>-kschl.
+                          EXIT.
+                        ENDIF.
+
+                        APPEND INITIAL LINE TO lt_effective_date ASSIGNING FIELD-SYMBOL(<lfs_effective_date>).
+                        IF <lfs_effective_date> IS ASSIGNED.
+                          <lfs_effective_date>-datab = <lfs_prc_comp_price_dtl>-datab.
+                        ENDIF.
+
+                        IF lv_base_unit_of_conversion NE <lfs_prc_comp_price_dtl>-konwa.
+
+                          convert_price(
+                            EXPORTING
+                              i_actual_unit     = <lfs_prc_comp_price_dtl>-konwa
+                              i_convert_unit   = lv_base_unit_of_conversion
+                              i_price            = <lfs_prc_comp_price_dtl>-kbetr
+                            RECEIVING
+                              r_converted_price = DATA(lv_converted_price) ).
+
+                          lv_total = lv_total + lv_converted_price.
+
+                          ASSIGN COMPONENT lv_fieldname OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                          IF <lfs_field> IS ASSIGNED.
+                            <lfs_field> = lv_converted_price.
+                            lv_total = lv_total.
+                            CLEAR lv_converted_price.
+                          ENDIF.
+
+                          ASSIGN COMPONENT lv_fieldname OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                          IF <lfs_field> IS ASSIGNED.
+                            <lfs_field> = lv_converted_price.
+                            lv_total = lv_total.
+                            CLEAR lv_converted_price.
+                          ENDIF.
+
+                        ELSE.
+
+                          ASSIGN COMPONENT lv_fieldname OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                          IF <lfs_field> IS ASSIGNED.
+                            <lfs_field> = <lfs_prc_comp_price_dtl>-kbetr.
+                            lv_total = lv_total + <lfs_prc_comp_price_dtl>-kbetr.
+                          ENDIF.
+
+                          ASSIGN COMPONENT lv_fieldname OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                          IF <lfs_field> IS ASSIGNED.
+                            <lfs_field> = <lfs_prc_comp_price_dtl>-kbetr.
+                            lv_total = lv_total.
+                          ENDIF.
+                        ENDIF.
+
+                      ENDLOOP.
+                    ENDIF.
+
+                  ENDLOOP.
+
+                ENDIF.
+
+*Get Effective Date.
+                IF line_exists( lt_effective_date[ 1 ]  ).
+                  SORT lt_effective_date BY datab DESCENDING.
+                  DATA(lv_effective_date) = lt_effective_date[ 1 ]-datab.
+
+                  ASSIGN COMPONENT 'DATAB' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = lv_effective_date.
+                  ENDIF.
+
+                  ASSIGN COMPONENT 'DATAB' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    <lfs_field> = lv_effective_date.
+                  ENDIF.
+
+                  APPEND INITIAL LINE TO lt_effect_date ASSIGNING FIELD-SYMBOL(<lfs_date>).
+                  IF <lfs_date> IS ASSIGNED.
+                    <lfs_date>-datab = lv_effective_date.
+                  ENDIF.
+
+                  CLEAR:lv_effective_date,
+                             lt_effective_date.
+                ENDIF.
+
+                ASSIGN COMPONENT 'TOTAL' OF STRUCTURE <lfs_confirm_data_email> TO <lfs_field>.
+                IF <lfs_field> IS ASSIGNED.
+                  <lfs_field> = lv_total.
+                ENDIF.
+
+                ASSIGN COMPONENT 'TOTAL' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field>.
+                IF <lfs_field> IS ASSIGNED.
+                  <lfs_field> = lv_total.
+                ENDIF.
+
+                CLEAR:lv_base_unit_of_conversion,
+                           lv_total.
+              ENDIF.
+
+            ENDLOOP.
+          ENDIF.
+
+*Get effective date for email subject.
+          IF line_exists( lt_effect_date[ 1 ]  ).
+            SORT lt_effect_date BY datab DESCENDING.
+            DATA(lv_effect_from_date) = lt_effect_date[ 1 ]-datab.
+            CLEAR lt_effect_date.
+          ENDIF.
+
+*-----------------------------------------------------------------------------------------------------------------
+*Send customer wise emails.
+*-----------------------------------------------------------------------------------------------------------------
+          IF <lfs_t_confirm_data_email> IS NOT INITIAL.
+
+            send_email_to_customer(
+              EXPORTING
+                i_t_confirm_data_email = <lfs_t_confirm_data_email>
+                i_kunnr                = <lfs_customer>-kunnr
+                i_customer             = <lfs_customer>-name1
+                i_effective_date       = lv_effect_from_date
+                i_vstel                = <lfs_airport>-vstel
+              CHANGING
+                c_t_confirm_alv_data   = <lfs_t_confirm_alv_data> ).
+
+          ENDIF.
+
+          CLEAR lv_effect_from_date.
+        ENDLOOP.
+
+      ENDIF.
+
+    ENDLOOP.
+    CLEAR lt_airports.
+
+*Set reference of confirmation alv data.
+    CLEAR gs_t_confirmation_alv_data.
+    GET REFERENCE OF <lfs_t_confirm_alv_data> INTO me->gs_t_confirmation_alv_data.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_EMAIL_BODY
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] R_T_EMAIL_BODY                 TYPE        TTSMW0_SOLISTI1
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_email_body.
+
+    CLEAR r_t_email_body.
+
+    APPEND INITIAL LINE TO r_t_email_body ASSIGNING FIELD-SYMBOL(<lfs_email_body>).
+    IF <lfs_email_body> IS ASSIGNED.
+      <lfs_email_body>-line = TEXT-029.
+    ENDIF.
+
+    APPEND INITIAL LINE TO r_t_email_body ASSIGNING <lfs_email_body>.
+    IF <lfs_email_body> IS ASSIGNED.
+      CONCATENATE TEXT-030 TEXT-031 INTO <lfs_email_body>-line SEPARATED BY space.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_EMAIL_SUBJECT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_DATE                         TYPE        DATAB
+* | [<-()] R_S_EMAIL_SUBJECT              TYPE        SODOCCHGI1
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_email_subject.
+
+    DATA:lv_date(10).
+
+    CLEAR r_s_email_subject.
+
+    r_s_email_subject-obj_name  = TEXT-026.
+    WRITE i_date TO lv_date DD/MM/YYYY.
+    CONCATENATE TEXT-027 TEXT-028  lv_date INTO r_s_email_subject-obj_descr SEPARATED BY space.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->PREPARE_PACKING_LIST
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_EMAIL_BODY_LINES             TYPE        I
+* | [--->] I_EMAIL_ATTACHMENT_LINES       TYPE        I
+* | [<-()] R_T_PACKING_LIST               TYPE        SOPCKLSTI1_T
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_packing_list.
+
+    CLEAR r_t_packing_list.
+
+*Packing List for email body
+    APPEND INITIAL LINE TO r_t_packing_list ASSIGNING FIELD-SYMBOL(<lfs_packing_list>).
+    IF <lfs_packing_list> IS ASSIGNED.
+      <lfs_packing_list>-head_start = 1.
+      <lfs_packing_list>-head_num   = 0.
+      <lfs_packing_list>-body_start = 1.
+      <lfs_packing_list>-body_num   = i_email_body_lines.
+      <lfs_packing_list>-doc_type   = 'RAW'.
+    ENDIF.
+
+*Packing list for email attachment.
+    APPEND INITIAL LINE TO r_t_packing_list ASSIGNING <lfs_packing_list>.
+    IF <lfs_packing_list> IS ASSIGNED.
+      <lfs_packing_list>-transf_bin = abap_true.
+      <lfs_packing_list>-head_start = 1.
+      <lfs_packing_list>-head_num   = 1.
+      <lfs_packing_list>-body_start = 1.
+      <lfs_packing_list>-body_num = i_email_attachment_lines.
+      <lfs_packing_list>-doc_type   = 'PDF'.
+      <lfs_packing_list>-obj_descr  = TEXT-047.
+      <lfs_packing_list>-obj_name   = 'PDF_ATTACHMENT'.
+      <lfs_packing_list>-doc_size   = i_email_attachment_lines * 255.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SEND_CUSTOMER_WISE_EMAILS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_CUSTOMER                     TYPE        NAME1_GP
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [--->] I_EFFCT_FROM_DATE              TYPE        DATUM
+* | [<-()] R_EMAIL_SENT_STATUS            TYPE        CHAR4
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_customer_wise_emails.
+
+    CLEAR r_email_sent_status.
+
+    EXPORT i_customer FROM i_customer TO MEMORY ID 'KUNNR'.
+    EXPORT gs_t_price_components FROM gs_t_price_components TO MEMORY ID 'PRICE'.
+
+    SUBMIT zdogsr_plane_price_adv_email TO SAP-SPOOL
+    DESTINATION 'LP01'
+    IMMEDIATELY ''
+    KEEP IN SPOOL 'X'
+    WITHOUT SPOOL DYNPRO AND RETURN.
+
+*Convert spool content into PDF Format.
+    DATA(lt_pdf_attachment) = convert_spool_into_pdf_format( ).
+
+*Send email.
+    DATA(lv_email_sent_status) = send_email( EXPORTING
+                                                                              i_kunnr                   = i_kunnr
+                                                                              i_date                     = i_effct_from_date
+                                                                              i_t_pdf_attachment = lt_pdf_attachment ).
+
+*Update email sent status in alv output.
+    IF lv_email_sent_status EQ abap_true.
+      r_email_sent_status = icon_checked.
+    ELSE.
+      r_email_sent_status = icon_incomplete.
+    ENDIF.
+
+    CLEAR lt_pdf_attachment.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SEND_EMAIL
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_PDF_ATTACHMENT             TYPE        TTSMW0_SOLISTI1
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [--->] I_DATE                         TYPE        DATAB
+* | [<-()] R_EMAIL_SENT_STATUS            TYPE        BOOLEAN
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_email.
+
+    DATA:lv_sent_to_all TYPE sonv-flag.
+
+    CLEAR r_email_sent_status.
+
+    IF  i_t_pdf_attachment  IS NOT INITIAL.
+
+*Email Subject.
+      DATA(ls_email_subject) = prepare_email_subject( EXPORTING i_date   = i_date ).
+
+*Email Body.
+      DATA(lt_email_body) = prepare_email_body( ).
+
+      DATA(lv_email_body_lines) = lines( lt_email_body ).
+      DATA(lv_email_attachment_lines) = lines( i_t_pdf_attachment ).
+
+*Email packing list.
+      DATA(lt_packing_list) = prepare_packing_list( EXPORTING
+                                                                               i_email_body_lines       = lv_email_body_lines
+                                                                               i_email_attachment_lines = lv_email_attachment_lines ).
+
+*Get email attachment size.
+      DATA(ls_attachment_size) = get_size_of_attachment( EXPORTING
+                                                                                           i_s_email_subject = ls_email_subject
+                                                                                           i_email_body_lines = lv_email_body_lines
+                                                                                           i_t_pdf_attachment   = i_t_pdf_attachment ).
+
+*Get email receivers.
+      DATA(lt_email_receivers) = get_email_receiver( i_kunnr ).
+
+*Send Email.
+      IF lt_email_receivers IS NOT INITIAL.
+        CALL FUNCTION 'SO_NEW_DOCUMENT_ATT_SEND_API1'
+          EXPORTING
+            document_data              = ls_attachment_size
+            put_in_outbox              = abap_true
+            commit_work                = abap_true
+          IMPORTING
+            sent_to_all                = lv_sent_to_all
+          TABLES
+            packing_list               = lt_packing_list
+            contents_bin               = i_t_pdf_attachment
+            contents_txt               = lt_email_body
+            receivers                  = lt_email_receivers
+          EXCEPTIONS
+            too_many_receivers         = 1
+            document_not_sent          = 2
+            document_type_not_exist    = 3
+            operation_no_authorization = 4
+            parameter_error            = 5
+            x_error                    = 6
+            enqueue_error              = 7
+            OTHERS                     = 8.
+        IF sy-subrc <> 0.
+          RETURN.
+        ELSE.
+          r_email_sent_status = abap_true.
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SEND_EMAIL_TO_CUSTOMER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_T_CONFIRM_DATA_EMAIL         TYPE        ANY TABLE
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [--->] I_CUSTOMER                     TYPE        NAME1_GP
+* | [--->] I_EFFECTIVE_DATE               TYPE        DATUM
+* | [--->] I_VSTEL                        TYPE        VSTEL
+* | [<-->] C_T_CONFIRM_ALV_DATA           TYPE        ANY TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_email_to_customer.
+
+*Set runtime data.
+    cl_salv_bs_runtime_info=>set(
+    EXPORTING
+      display = abap_true
+      metadata = abap_false
+      data     = abap_true
+).
+
+*Set Email data.
+    cl_salv_bs_runtime_info=>set_data(
+      EXPORTING
+        data      = i_t_confirm_data_email
+    ).
+
+*Send email to customer.
+    DATA(lv_email_sent_status) = send_customer_wise_emails( EXPORTING i_customer = i_customer
+                                                                                                                   i_kunnr       = i_kunnr
+                                                                                                                   i_effct_from_date = i_effective_date ).
+
+*Set email sent status.
+    set_email_sent_status( EXPORTING i_kunnr = i_kunnr
+                                                           i_vstel  = i_vstel
+                                                           i_email_sent_status = lv_email_sent_status
+                                        CHANGING c_t_confirm_alv_data = c_t_confirm_alv_data ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SET_EMAIL_SENT_STATUS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] I_KUNNR                        TYPE        KUNNR
+* | [--->] I_VSTEL                        TYPE        VSTEL
+* | [--->] I_EMAIL_SENT_STATUS            TYPE        CHAR4
+* | [<-->] C_T_CONFIRM_ALV_DATA           TYPE        ANY TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD set_email_sent_status.
+
+    FIELD-SYMBOLS:
+      <lfs_field1>       TYPE any,
+      <lfs_field2>       TYPE any,
+      <lfs_email_status> TYPE any.
+
+    LOOP AT c_t_confirm_alv_data ASSIGNING FIELD-SYMBOL(<lfs_confirm_data_alv>).
+      ASSIGN COMPONENT 'KUNNR' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field1>.
+      IF <lfs_field1> IS ASSIGNED.
+        IF <lfs_field1> EQ i_kunnr.
+
+          ASSIGN COMPONENT 'VSTEL' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_field2>.
+          IF <lfs_field2> IS ASSIGNED.
+            IF <lfs_field2> EQ i_vstel.
+
+              ASSIGN COMPONENT 'EMAIL_SENT' OF STRUCTURE <lfs_confirm_data_alv> TO <lfs_email_status>.
+              IF <lfs_email_status> IS ASSIGNED.
+                <lfs_email_status> = i_email_sent_status.
+                EXIT.
+              ENDIF.
+
+            ENDIF.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SIMULATE_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] ZCX_OGS_EXCEPTION_HANDLING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD simulate_data.
+
+    CLEAR gs_t_simulated_data.
+
+*Get data for simulation.
+    get_data( ).
+
+*Compare and simulate data.
+    compare_and_simulate_data( ).
+
+*Display simulated data.
+    display_simulated_data( ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_OGS_INTO_PLANE_PRICE_ADV->SORT_ALV_DISPLAY_ON_CUSTOMER
+* +-------------------------------------------------------------------------------------------------+
+* | [<-->] C_O_ALV_INSTANCE               TYPE REF TO CL_SALV_TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD sort_alv_display_on_customer.
+
+    DATA: lo_sort TYPE REF TO cl_salv_sorts.
+
+    lo_sort = c_o_alv_instance->get_sorts( ).
+
+    TRY.
+        CALL METHOD lo_sort->add_sort
+          EXPORTING
+            columnname = 'KUNNR'
+            position   = 1
+            subtotal   = if_salv_c_bool_sap=>true.
+      CATCH cx_salv_not_found .
+      CATCH cx_salv_existing .
+      CATCH cx_salv_data_error .
+    ENDTRY.
+
+    TRY.
+        CALL METHOD lo_sort->add_sort
+          EXPORTING
+            columnname = 'VSTEL'
+            position   = 2
+            subtotal   = if_salv_c_bool_sap=>true.
+      CATCH cx_salv_not_found .
+      CATCH cx_salv_existing .
+      CATCH cx_salv_data_error .
+    ENDTRY.
+
+  ENDMETHOD.
+ENDCLASS.
