@@ -1,0 +1,1563 @@
+class ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT definition
+  public
+  inheriting from ZCL_ZODATA_JOR_ESTIMAT_DPC
+  create public .
+
+public section.
+
+  data GT_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS .
+  data GT_SELECTED_MATNR type /IWBEP/T_COD_SELECT_OPTIONS .
+
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY
+    redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_STREAM
+    redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~DELETE_STREAM
+    redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_EXPANDED_ENTITY
+    redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_STREAM
+    redefinition .
+protected section.
+
+  methods BOMCOMPONENTSSET_GET_ENTITYSET
+    redefinition .
+  methods COMPARISONRATE01_GET_ENTITYSET
+    redefinition .
+  methods COMPARISONRATESS_GET_ENTITYSET
+    redefinition .
+  methods HEADERSET_GET_ENTITYSET
+    redefinition .
+  methods JUSTIFIED_RATESE_GET_ENTITYSET
+    redefinition .
+private section.
+
+  methods CONVERT_FILTER_STRING
+    importing
+      !IV_FILTER_STRING type STRING
+    exporting
+      !ET_FILTER_SELECT_OPTIONS type /IWBEP/T_MGW_SELECT_OPTION .
+ENDCLASS.
+
+
+
+CLASS ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING(optional)
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING(optional)
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING(optional)
+* | [--->] IO_DATA_PROVIDER               TYPE REF TO /IWBEP/IF_MGW_ENTRY_PROVIDER
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR(optional)
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH(optional)
+* | [--->] IO_EXPAND                      TYPE REF TO /IWBEP/IF_MGW_ODATA_EXPAND
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITY_C(optional)
+* | [<---] ER_DEEP_ENTITY                 TYPE REF TO DATA
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
+
+    DATA:ls_deep_entity TYPE zcl_zodata_jor_estimat_mpc_ext=>ty_deep_entity.
+    DATA:ls_header TYPE zcl_zodata_jor_estimat_mpc_ext=>ts_header.
+    DATA:lt_bomcomponents TYPE zcl_zodata_jor_estimat_mpc_ext=>tt_bomcomponents.
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo.
+    DATA:lo_msg_container TYPE REF TO /iwbep/if_message_container.
+
+    CASE iv_entity_set_name.
+      WHEN 'HeaderSet'.
+
+*Instantiate message container
+        me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+          RECEIVING
+            ro_message_container = lo_msg_container ).
+
+*Read input payload data
+        TRY.
+            io_data_provider->read_entry_data(
+              IMPORTING
+                es_data = ls_deep_entity ).
+
+            IF ls_deep_entity IS NOT INITIAL.
+
+              ls_header = CORRESPONDING #( ls_deep_entity ).
+              lt_bomcomponents = CORRESPONDING #( ls_deep_entity-nav_headertobomcomponents ).
+
+*Instantiate BO class
+              IF lo_jor_estimate_bo IS NOT BOUND.
+                lo_jor_estimate_bo = NEW #( ).
+              ENDIF.
+
+              IF lo_jor_estimate_bo IS BOUND.
+                TRY.
+
+                    IF ls_header IS NOT INITIAL AND
+                       lt_bomcomponents IS NOT INITIAL.
+
+                      IF lt_bomcomponents[ 1 ]-material IS NOT INITIAL.
+                        DATA(lv_save_price) = abap_true.
+                      ELSE.
+                        DATA(lv_update_price) = abap_true.
+                      ENDIF.
+
+*Save price
+*--------------------------------------------------------------------------------------------------------------------
+                      IF lv_save_price EQ abap_true.
+                        lo_jor_estimate_bo->save_price( EXPORTING iv_project_id     = ls_header-projectid
+                                                                  it_bom_components = lt_bomcomponents
+                                                         IMPORTING ev_success        = DATA(lv_price_saved) ).
+
+                        IF lv_price_saved EQ abap_true.
+                          IF lo_msg_container IS BOUND.
+                            lo_msg_container->add_message(
+                              EXPORTING
+                                iv_msg_type               = 'S'
+                                iv_msg_id                 = 'ZJOR'
+                                iv_msg_number             = '011'
+                                iv_is_leading_message     = abap_true
+                                iv_add_to_response_header = abap_true ).
+                          ENDIF.
+
+                          me->copy_data_to_ref(
+                            EXPORTING
+                              is_data = ls_deep_entity
+                            CHANGING
+                              cr_data = er_deep_entity ).
+                        ENDIF.
+                      ENDIF.
+
+*Update price
+*--------------------------------------------------------------------------------------------------------------------
+                      IF lv_update_price EQ abap_true.
+                        lo_jor_estimate_bo->update_price( EXPORTING iv_project_id        = ls_header-projectid
+                                                                    iv_material_category = ls_header-materialcategory
+                                                                    it_bom_components    = lt_bomcomponents ).
+
+                        IF lo_msg_container IS BOUND.
+                          lo_msg_container->add_message(
+                            EXPORTING
+                              iv_msg_type               = 'S'
+                              iv_msg_id                 = 'ZJOR'
+                              iv_msg_number             = '012'
+                              iv_is_leading_message     = abap_true
+                              iv_add_to_response_header = abap_true ).
+                        ENDIF.
+
+                        me->copy_data_to_ref(
+                          EXPORTING
+                            is_data = ls_deep_entity
+                          CHANGING
+                            cr_data = er_deep_entity ).
+                      ENDIF.
+
+                    ENDIF.
+
+*Raise Exception
+                  CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+
+                    DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+                    IF lo_msg_container IS BOUND.
+                      lo_msg_container->add_message(
+                        EXPORTING
+                          iv_msg_type   = ls_message-msgty
+                          iv_msg_id     = ls_message-msgid
+                          iv_msg_number = ls_message-msgno
+                          iv_msg_v1     = ls_message-msgv1
+                          iv_msg_v2     = ls_message-msgv2
+                          iv_msg_v3     = ls_message-msgv3
+                          iv_msg_v4     = ls_message-msgv4 ).
+
+                      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                        EXPORTING
+                          message_container = lo_msg_container.
+                    ENDIF.
+
+                ENDTRY.
+              ENDIF.
+
+            ENDIF.
+
+          CATCH /iwbep/cx_mgw_tech_exception.
+            MESSAGE e018(zjor) INTO ls_message.
+
+            IF lo_msg_container IS BOUND.
+              lo_msg_container->add_message(
+                EXPORTING
+                  iv_msg_type   = ls_message-msgty
+                  iv_msg_id     = ls_message-msgid
+                  iv_msg_number = ls_message-msgno
+                  iv_msg_v1     = ls_message-msgv1
+                  iv_msg_v2     = ls_message-msgv2
+                  iv_msg_v3     = ls_message-msgv3
+                  iv_msg_v4     = ls_message-msgv4 ).
+
+              RAISE EXCEPTION TYPE /iwbep/cx_mgw_tech_exception
+                EXPORTING
+                  message_container = lo_msg_container.
+            ENDIF.
+        ENDTRY.
+
+      WHEN OTHERS.
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_STREAM
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING(optional)
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING(optional)
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING(optional)
+* | [--->] IS_MEDIA_RESOURCE              TYPE        TY_S_MEDIA_RESOURCE
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR(optional)
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH(optional)
+* | [--->] IV_SLUG                        TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITY_C(optional)
+* | [<---] ER_ENTITY                      TYPE REF TO DATA
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* | [!CX!] ZCX_DE_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_stream.
+
+    DATA:lo_msg_container TYPE REF TO /iwbep/if_message_container.
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo.
+
+    DATA:lv_project_id   TYPE zrpm_extid,
+         lv_component_id TYPE idnrk,
+         lv_filename     TYPE localfile.
+
+    CASE  iv_entity_set_name.
+      WHEN 'AttachmentSet'.
+
+*Read request headers
+        DATA(lt_headers) = io_tech_request_context->get_request_headers( ).
+
+        IF lt_headers IS NOT INITIAL AND
+           iv_slug IS NOT INITIAL.
+
+*Get header parameters value
+          SPLIT iv_slug AT '|' INTO lv_project_id lv_component_id lv_filename.
+
+          IF lv_project_id IS NOT INITIAL AND
+             lv_component_id IS NOT INITIAL AND
+             lv_filename IS NOT INITIAL.
+
+*Instantiate message contianer
+            me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+              RECEIVING
+                ro_message_container = lo_msg_container ).
+
+*Instantiate BO class
+            lo_jor_estimate_bo = NEW #( ).
+
+            IF lo_jor_estimate_bo IS BOUND.
+
+              TRY.
+                  lo_jor_estimate_bo->create_attachment(
+                    EXPORTING
+                      iv_filename       = lv_filename
+                      iv_project_id     = lv_project_id
+                      iv_component_id   = lv_component_id
+                      is_media_resource = is_media_resource
+                    IMPORTING
+                      ev_success        = DATA(lv_file_created) ).
+
+                  IF lv_file_created EQ abap_true.
+                    IF lo_msg_container IS BOUND.
+                      lo_msg_container->add_message(
+                        EXPORTING
+                        iv_msg_type               = 'S'
+                        iv_msg_id                 = 'ZJOR'
+                        iv_msg_number             = '007'
+                        iv_is_leading_message     = abap_true
+                        iv_add_to_response_header = abap_true ).
+                    ENDIF.
+
+                    copy_data_to_ref( EXPORTING is_data = is_media_resource
+                                      CHANGING  cr_data = er_entity ).
+                  ENDIF.
+
+                CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+
+                  DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+                  IF lo_msg_container IS BOUND.
+                    lo_msg_container->add_message(
+                      EXPORTING
+                      iv_msg_type   = ls_message-msgty
+                      iv_msg_id     = ls_message-msgid
+                      iv_msg_number = ls_message-msgno
+                      iv_msg_v1     = ls_message-msgv1
+                      iv_msg_v2     = ls_message-msgv2
+                      iv_msg_v3     = ls_message-msgv3
+                      iv_msg_v4     = ls_message-msgv4 ).
+
+                    RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                      EXPORTING
+                        message_container = lo_msg_container.
+                  ENDIF.
+
+              ENDTRY.
+
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->/IWBEP/IF_MGW_APPL_SRV_RUNTIME~DELETE_STREAM
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING(optional)
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING(optional)
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING(optional)
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR(optional)
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH(optional)
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITY_D(optional)
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD /iwbep/if_mgw_appl_srv_runtime~delete_stream.
+
+    DATA:ls_data TYPE zcl_zodata_jor_estimat_mpc=>ts_attachment.
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo.
+    DATA:lo_msg_container TYPE REF TO /iwbep/if_message_container.
+
+    CASE  iv_entity_set_name.
+      WHEN 'AttachmentSet'.
+
+        IF it_key_tab IS NOT INITIAL.
+
+          IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+            ls_data-projectid = it_key_tab[ name = 'ProjectId' ]-value.
+          ENDIF.
+
+          IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+            ls_data-materialcategory = it_key_tab[ name = 'MaterialCategory' ]-value.
+          ENDIF.
+
+          IF line_exists( it_key_tab[ name = 'ComponentId' ] ).
+            ls_data-componentid = it_key_tab[ name = 'ComponentId' ]-value.
+          ENDIF.
+
+        ENDIF.
+
+        IF ls_data-projectid IS NOT INITIAL        AND
+           ls_data-materialcategory IS NOT INITIAL AND
+           ls_data-componentid IS NOT INITIAL.
+
+*Instantiate message container
+          me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+            RECEIVING
+              ro_message_container = lo_msg_container ).
+
+*Instantiate BO class
+          lo_jor_estimate_bo = NEW #( ).
+
+          IF lo_jor_estimate_bo IS BOUND.
+
+            TRY.
+                lo_jor_estimate_bo->delete_attachment(
+                  EXPORTING
+                    iv_project_id        = ls_data-projectid
+                    iv_material_category = ls_data-materialcategory
+                    iv_component_id      = ls_data-componentid
+                  IMPORTING
+                    ev_success           = DATA(lv_file_deleted) ).
+
+                IF lv_file_deleted EQ abap_true.
+                  IF lo_msg_container IS BOUND.
+                    lo_msg_container->add_message(
+                      EXPORTING
+                        iv_msg_type               = 'S'
+                        iv_msg_id                 = 'ZJOR'
+                        iv_msg_number             = '003'
+                        iv_is_leading_message     = abap_true
+                        iv_add_to_response_header = abap_true ).
+                  ENDIF.
+                ENDIF.
+
+              CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+
+                DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+                IF lo_msg_container IS BOUND.
+                  lo_msg_container->add_message(
+                    EXPORTING
+                      iv_msg_type               = ls_message-msgty
+                      iv_msg_id                 = ls_message-msgid
+                      iv_msg_number             = ls_message-msgno
+                      iv_msg_v1                 = ls_message-msgv1
+                      iv_msg_v2                 = ls_message-msgv2
+                      iv_msg_v3                 = ls_message-msgv3
+                      iv_msg_v4                 = ls_message-msgv4 ).
+
+                  RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                    EXPORTING
+                      message_container = lo_msg_container.
+                ENDIF.
+
+            ENDTRY.
+
+          ENDIF.
+        ENDIF.
+
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->/IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_EXPANDED_ENTITY
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING(optional)
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING(optional)
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING(optional)
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR(optional)
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH(optional)
+* | [--->] IO_EXPAND                      TYPE REF TO /IWBEP/IF_MGW_ODATA_EXPAND(optional)
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITY(optional)
+* | [<---] ER_ENTITY                      TYPE REF TO DATA
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_ENTITY_CNTXT
+* | [<---] ET_EXPANDED_CLAUSES            TYPE        STRING_TABLE
+* | [<---] ET_EXPANDED_TECH_CLAUSES       TYPE        STRING_TABLE
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_expanded_entity.
+
+*    DATA:BEGIN OF lt_justifiedrates_data.
+*           INCLUDE TYPE  zcl_zodata_jor_estimat_mpc=>ts_header.
+*    DATA:  nav_headertojustifiedrates TYPE zcl_zodata_jor_estimat_mpc=>tt_justifiedrates.
+*    DATA:END OF lt_justifiedrates_data.
+*
+*    DATA:BEGIN OF lt_comparisonrates_data.
+*           INCLUDE TYPE  zcl_zodata_jor_estimat_mpc=>ts_header.
+*    DATA:  nav_headertocomparisonrates TYPE zcl_zodata_jor_estimat_mpc=>tt_comparisonrateshdr.
+*    DATA:END OF lt_comparisonrates_data.
+*
+*    DATA:ls_estimate       TYPE zde_estimate1,
+*         ls_attachment     TYPE zcl_zodata_jor_estimat_mpc=>ts_attachment,
+*         ls_justifiedrates TYPE zcl_zodata_jor_estimat_mpc=>ts_justifiedrates.
+*
+*    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo,
+*         lo_exception       TYPE REF TO /iwbep/if_message_container.
+*
+*    CASE iv_entity_set_name.
+*      WHEN 'JustifiedRatesSet'.
+*
+*        IF it_key_tab IS NOT INITIAL.
+*
+*          IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+*            ls_estimate-zproj_id = it_key_tab[ name = 'ProjectId' ]-value.
+*          ENDIF.
+*
+*          IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+*            ls_estimate-mat_cat = it_key_tab[ name = 'MaterialCategory' ]-value.
+*          ENDIF.
+*
+*          IF line_exists( it_key_tab[ name = 'Material' ] ).
+*            ls_estimate-zmat_no = it_key_tab[ name = 'Material' ]-value.
+*          ENDIF.
+*
+**Get header data
+*          IF ls_estimate-zproj_id IS NOT INITIAL AND
+*             ls_estimate-mat_cat IS NOT INITIAL AND
+*             ls_estimate-zmat_no IS NOT INITIAL.
+*
+**Get material description
+*            SELECT SINGLE zmat_desc
+*            FROM zde_estimate1
+*            INTO @DATA(lv_mat_descp)
+*            WHERE zproj_id EQ @ls_estimate-zproj_id AND
+*                  mat_cat  EQ @ls_estimate-mat_cat AND
+*                  zmat_no  EQ @ls_estimate-zmat_no.
+*            IF sy-subrc EQ 0.
+*              lt_justifiedrates_data-materialdescription = lv_mat_descp.
+*            ENDIF.
+*
+**Get project description
+*            SELECT SINGLE work_name
+*            FROM zde_head
+*            INTO @DATA(lv_proj_descr)
+*            WHERE project_code EQ @ls_estimate-zproj_id.
+*            IF sy-subrc EQ 0.
+*              lt_justifiedrates_data-projectdescription = lv_proj_descr.
+*            ENDIF.
+*
+*            lt_justifiedrates_data-projectid        = ls_estimate-zproj_id.
+*            lt_justifiedrates_data-materialcategory = ls_estimate-mat_cat.
+*            lt_justifiedrates_data-material         = ls_estimate-zmat_no.
+*
+**Map Bom Components data
+*            IF lo_jor_estimate_bo IS NOT BOUND.
+*              lo_jor_estimate_bo = NEW #( ).
+*            ENDIF.
+*
+*            IF lo_jor_estimate_bo IS BOUND.
+*              TRY.
+*
+*                  lo_jor_estimate_bo->get_justified_rates(
+*                    EXPORTING
+*                      iv_project_id        = ls_estimate-zproj_id
+*                      iv_material_category = ls_estimate-mat_cat
+*                      iv_material_no       = ls_estimate-zmat_no
+*                    IMPORTING
+*                      et_justifiedrates    = lt_justifiedrates_data-nav_headertojustifiedrates ).
+*
+*                  TRY.
+*                      me->copy_data_to_ref(
+*                        EXPORTING
+*                          is_data = lt_justifiedrates_data
+*                        CHANGING
+*                          cr_data = er_entity ).
+*                    CATCH cx_root.
+*                  ENDTRY.
+*
+*                  APPEND 'NAV_HEADERTOJUSTIFIEDRATES' TO et_expanded_tech_clauses.
+*
+*                CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+*                  DATA(ls_message) = lo_jor_exception->read_exception( ).
+*
+**Raise exception
+*                  me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+*                    RECEIVING
+*                      ro_message_container = lo_exception ).
+*
+*                  IF lo_exception IS BOUND.
+*                    lo_exception->add_message(
+*                    EXPORTING
+*                      iv_msg_type   = ls_message-msgty
+*                      iv_msg_id     = ls_message-msgid
+*                      iv_msg_number = ls_message-msgno
+*                      iv_msg_v1     = ls_message-msgv1
+*                      iv_msg_v2     = ls_message-msgv2
+*                      iv_msg_v3     = ls_message-msgv3
+*                      iv_msg_v4     = ls_message-msgv4 ).
+*
+*                    RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+*                      EXPORTING
+*                        message_container = lo_exception.
+*
+*                  ENDIF.
+*              ENDTRY.
+*
+*            ENDIF.
+*          ENDIF.
+*        ENDIF.
+*
+*      WHEN 'ComparisonRatesSet'.
+*
+*        IF it_key_tab IS NOT INITIAL.
+*
+*          IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+*            ls_estimate-zproj_id = it_key_tab[ name = 'ProjectId' ]-value.
+*          ENDIF.
+*
+*          IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+*            ls_estimate-mat_cat = it_key_tab[ name = 'MaterialCategory' ]-value.
+*          ENDIF.
+*
+*          IF line_exists( it_key_tab[ name = 'Material' ] ).
+*            ls_estimate-zmat_no = it_key_tab[ name = 'Material' ]-value.
+*          ENDIF.
+*
+**Get header data
+*          IF ls_estimate-zproj_id IS NOT INITIAL AND
+*             ls_estimate-mat_cat IS NOT INITIAL AND
+*             ls_estimate-zmat_no IS NOT INITIAL.
+*
+**Get material description
+*            SELECT SINGLE zmat_desc
+*            FROM zde_estimate1
+*            INTO @lv_mat_descp
+*            WHERE zproj_id EQ @ls_estimate-zproj_id AND
+*                  mat_cat  EQ @ls_estimate-mat_cat AND
+*                  zmat_no  EQ @ls_estimate-zmat_no.
+*            IF sy-subrc EQ 0.
+*              lt_comparisonrates_data-materialdescription = lv_mat_descp.
+*            ENDIF.
+*
+**Get project description
+*            SELECT SINGLE work_name
+*            FROM zde_head
+*            INTO @lv_proj_descr
+*            WHERE project_code EQ @ls_estimate-zproj_id.
+*            IF sy-subrc EQ 0.
+*              lt_comparisonrates_data-projectdescription = lv_proj_descr.
+*            ENDIF.
+*
+*            lt_comparisonrates_data-projectid        = ls_estimate-zproj_id.
+*            lt_comparisonrates_data-materialcategory = ls_estimate-mat_cat.
+*            lt_comparisonrates_data-material         = ls_estimate-zmat_no.
+*
+**Map Bom Components data
+*            IF lo_jor_estimate_bo IS NOT BOUND.
+*              lo_jor_estimate_bo = NEW #( ).
+*            ENDIF.
+*
+*            IF lo_jor_estimate_bo IS BOUND.
+*              TRY.
+*
+*                  lo_jor_estimate_bo->get_comparison_rates_header(
+*                    EXPORTING
+*                      iv_project_id             = ls_estimate-zproj_id
+*                      iv_material_category      = ls_estimate-mat_cat
+*                      iv_material_no            = ls_estimate-zmat_no
+*                    IMPORTING
+*                      et_comparisonrates_header = lt_comparisonrates_data-nav_headertocomparisonrates ).
+*
+*                  TRY.
+*                      me->copy_data_to_ref(
+*                        EXPORTING
+*                          is_data = lt_comparisonrates_data
+*                        CHANGING
+*                          cr_data = er_entity ).
+*                    CATCH cx_root.
+*                  ENDTRY.
+*
+*                  APPEND 'NAV_HEADERTOCOMPARISONRATES' TO et_expanded_tech_clauses.
+*
+*                CATCH zcx_jor_exception INTO lo_jor_exception.
+*                  ls_message = lo_jor_exception->read_exception( ).
+*
+**Raise exception
+*                  me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+*                    RECEIVING
+*                      ro_message_container = lo_exception ).
+*
+*                  IF lo_exception IS BOUND.
+*                    lo_exception->add_message(
+*                    EXPORTING
+*                      iv_msg_type   = ls_message-msgty
+*                      iv_msg_id     = ls_message-msgid
+*                      iv_msg_number = ls_message-msgno
+*                      iv_msg_v1     = ls_message-msgv1
+*                      iv_msg_v2     = ls_message-msgv2
+*                      iv_msg_v3     = ls_message-msgv3
+*                      iv_msg_v4     = ls_message-msgv4 ).
+*
+*                    RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+*                      EXPORTING
+*                        message_container = lo_exception.
+*
+*                  ENDIF.
+*              ENDTRY.
+*
+*            ENDIF.
+*          ENDIF.
+*        ENDIF.
+*
+*      WHEN 'AttachmentSet'.
+*
+*        IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+*          ls_attachment-projectid = it_key_tab[ name = 'ProjectId' ]-value.
+*        ENDIF.
+*
+*        IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+*          ls_attachment-materialcategory = it_key_tab[ name = 'MaterialCategory' ]-value.
+*        ENDIF.
+*
+*        IF line_exists( it_key_tab[ name = 'Material' ] ).
+*          ls_attachment-material = it_key_tab[ name = 'Material' ]-value.
+*        ENDIF.
+*
+*        IF line_exists( it_key_tab[ name = 'ComponentId' ] ).
+*          ls_attachment-componentid = it_key_tab[ name = 'ComponentId' ]-value.
+*        ENDIF.
+*
+*        IF ls_attachment-projectid IS NOT INITIAL AND
+*           ls_attachment-materialcategory IS NOT INITIAL AND
+*           ls_attachment-componentid IS NOT INITIAL.
+*
+*          IF lo_jor_estimate_bo IS NOT BOUND.
+*            lo_jor_estimate_bo = NEW #( ).
+*          ENDIF.
+*
+*          IF lo_jor_estimate_bo IS BOUND.
+*
+*            TRY.
+*                lo_jor_estimate_bo->get_attachment_xstring(
+*                  EXPORTING
+*                    iv_project_id        = ls_attachment-projectid
+*                    iv_material_category = ls_attachment-materialcategory
+*                    iv_component_id      = ls_attachment-componentid
+*                  IMPORTING
+*                    es_stream            = DATA(ls_stream) ).
+*
+*                ls_attachment-value    = ls_stream-value.
+*                ls_attachment-mimetype = ls_stream-mime_type.
+*
+**Map data to output
+*                TRY.
+*                    me->copy_data_to_ref(
+*                      EXPORTING
+*                        is_data = ls_attachment
+*                      CHANGING
+*                        cr_data = er_entity ).
+*                  CATCH cx_root.
+*                ENDTRY.
+*
+*              CATCH zcx_jor_exception INTO lo_jor_exception.
+*
+*                ls_message = lo_jor_exception->read_exception( ).
+*
+*                me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+*                  RECEIVING
+*                    ro_message_container = lo_exception ).
+*
+*                IF lo_exception IS BOUND.
+*                  lo_exception->add_message(
+*                    EXPORTING
+*                      iv_msg_type   = ls_message-msgty
+*                      iv_msg_id     = ls_message-msgid
+*                      iv_msg_number = ls_message-msgno
+*                      iv_msg_v1     = ls_message-msgv1
+*                      iv_msg_v2     = ls_message-msgv2
+*                      iv_msg_v3     = ls_message-msgv3
+*                      iv_msg_v4     = ls_message-msgv4 ).
+*
+*                  RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+*                    EXPORTING
+*                      message_container = lo_exception.
+*
+*                ENDIF.
+*
+*            ENDTRY.
+*          ENDIF.
+*        ENDIF.
+*
+*        APPEND 'NAV_BOMCOMPONENTSTOATTACHMENT' TO et_expanded_tech_clauses.
+*
+*      WHEN OTHERS.
+*    ENDCASE.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->/IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_STREAM
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING(optional)
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING(optional)
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING(optional)
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR(optional)
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH(optional)
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITY(optional)
+* | [<---] ER_STREAM                      TYPE REF TO DATA
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_ENTITY_CNTXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* | [!CX!] CX_FP_API_REPOSITORY
+* | [!CX!] CX_FP_API_INTERNAL
+* | [!CX!] CX_FP_API_USAGE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD /iwbep/if_mgw_appl_srv_runtime~get_stream.
+
+    DATA:ls_data TYPE zcl_zodata_jor_estimat_mpc=>ts_attachment.
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo.
+    DATA:lo_exception TYPE REF TO /iwbep/if_message_container.
+    DATA:ls_media TYPE ty_s_media_resource.
+
+    TRY.
+
+        CASE  iv_entity_set_name.
+          WHEN 'AttachmentSet'.
+
+            IF it_key_tab IS NOT INITIAL.
+
+              IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+                ls_data-projectid = it_key_tab[ name = 'ProjectId' ]-value.
+              ENDIF.
+
+              IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+                ls_data-materialcategory = it_key_tab[ name = 'MaterialCategory' ]-value.
+              ENDIF.
+
+              IF line_exists( it_key_tab[ name = 'ComponentId' ] ).
+                ls_data-componentid = it_key_tab[ name = 'ComponentId' ]-value.
+              ENDIF.
+
+              IF ls_data-projectid IS NOT INITIAL        AND
+                 ls_data-materialcategory IS NOT INITIAL AND
+                 ls_data-componentid IS NOT INITIAL.
+
+                lo_jor_estimate_bo = NEW #( ).
+                IF lo_jor_estimate_bo IS BOUND.
+
+                  lo_jor_estimate_bo->get_attachment(
+                    EXPORTING
+                      iv_project_id        = ls_data-projectid
+                      iv_material_category = ls_data-materialcategory
+                      iv_component_id      = ls_data-componentid
+                    IMPORTING
+                      es_stream            = DATA(ls_stream) ).
+
+                  ls_media-mime_type = ls_stream-mime_type.
+                  ls_media-value     = ls_stream-value.
+                  copy_data_to_ref( EXPORTING is_data = ls_media
+                                    CHANGING  cr_data = er_stream ).
+
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+          WHEN 'JustificationStatementSet'.
+
+            IF it_key_tab IS NOT INITIAL.
+
+              IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+                ls_data-projectid = it_key_tab[ name = 'ProjectId' ]-value.
+              ENDIF.
+
+              IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+                ls_data-materialcategory = it_key_tab[ name = 'MaterialCategory' ]-value.
+              ENDIF.
+
+              IF ls_data-projectid IS NOT INITIAL AND
+                 ls_data-materialcategory IS NOT INITIAL.
+
+                lo_jor_estimate_bo = NEW #( ).
+                IF lo_jor_estimate_bo IS BOUND.
+
+                  lo_jor_estimate_bo->get_justification_statement(
+                    EXPORTING
+                      iv_project_id        = ls_data-projectid
+                      iv_material_category = ls_data-materialcategory
+                    IMPORTING
+                      es_stream            = ls_stream ).
+
+                  ls_media-mime_type = ls_stream-mime_type.
+                  ls_media-value     = ls_stream-value.
+                  copy_data_to_ref( EXPORTING is_data = ls_media
+                                    CHANGING  cr_data = er_stream ).
+
+                ENDIF.
+              ENDIF.
+
+            ENDIF.
+
+          WHEN OTHERS.
+
+        ENDCASE.
+
+      CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+
+        DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+*Raise exception
+        me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+          RECEIVING
+            ro_message_container = lo_exception ).
+
+        IF lo_exception IS BOUND.
+          lo_exception->add_message(
+            EXPORTING
+              iv_msg_type   = ls_message-msgty
+              iv_msg_id     = ls_message-msgid
+              iv_msg_number = ls_message-msgno
+              iv_msg_v1     = ls_message-msgv1
+              iv_msg_v2     = ls_message-msgv2
+              iv_msg_v3     = ls_message-msgv3
+              iv_msg_v4     = ls_message-msgv4 ).
+
+          RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+            EXPORTING
+              message_container = lo_exception.
+
+        ENDIF.
+
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->BOMCOMPONENTSSET_GET_ENTITYSET
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING
+* | [--->] IT_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* | [--->] IS_PAGING                      TYPE        /IWBEP/S_MGW_PAGING
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH
+* | [--->] IT_ORDER                       TYPE        /IWBEP/T_MGW_SORTING_ORDER
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [--->] IV_SEARCH_STRING               TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITYSET(optional)
+* | [<---] ET_ENTITYSET                   TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD bomcomponentsset_get_entityset.
+
+    DATA:ls_estimate TYPE zde_estimate1.
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo.
+    DATA:lo_exception TYPE REF TO /iwbep/if_message_container.
+
+*Read key values
+    IF it_key_tab IS NOT INITIAL.
+
+      IF line_exists( it_key_tab[ name = 'ProjectId' ] ).
+        ls_estimate-zproj_id = it_key_tab[ name = 'ProjectId' ]-value.
+      ENDIF.
+
+      IF line_exists( it_key_tab[ name = 'MaterialCategory' ] ).
+        ls_estimate-mat_cat = it_key_tab[ name = 'MaterialCategory' ]-value.
+      ENDIF.
+
+      IF line_exists( it_key_tab[ name = 'Material' ] ).
+        ls_estimate-zmat_no = it_key_tab[ name = 'Material' ]-value ##NO_TEXT.
+      ENDIF.
+
+      IF ls_estimate-zproj_id IS NOT INITIAL AND
+         ls_estimate-mat_cat  IS NOT INITIAL AND
+         ls_estimate-zmat_no  IS NOT INITIAL.
+
+        lo_jor_estimate_bo = NEW #( ).
+        IF lo_jor_estimate_bo IS BOUND.
+          TRY.
+              lo_jor_estimate_bo->get_bomcomponents( EXPORTING iv_project_id        = ls_estimate-zproj_id
+                                                               iv_material_category = ls_estimate-mat_cat
+                                                               iv_material_no       = ls_estimate-zmat_no
+                                                               it_selected_matnr    = gt_selected_matnr
+                                                               it_bom_components    = gt_bom_components
+                                                      IMPORTING et_bom_components   = DATA(lt_bom_components) ).
+
+              LOOP AT lt_bom_components ASSIGNING FIELD-SYMBOL(<lfs_bom_components>).
+                IF line_exists( gt_bom_components[ componentid = <lfs_bom_components>-componentid ] ).
+                  DELETE lt_bom_components WHERE componentid EQ <lfs_bom_components>-componentid.
+                ENDIF.
+              ENDLOOP.
+              APPEND LINES OF lt_bom_components TO gt_bom_components.
+
+              et_entityset = lt_bom_components.
+            CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+
+              DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+*Raise exception
+              me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+                RECEIVING
+                  ro_message_container = lo_exception ).
+
+              IF lo_exception IS BOUND.
+                lo_exception->add_message(
+                  EXPORTING
+                    iv_msg_type   = ls_message-msgty
+                    iv_msg_id     = ls_message-msgid
+                    iv_msg_number = ls_message-msgno
+                    iv_msg_v1     = ls_message-msgv1
+                    iv_msg_v2     = ls_message-msgv2
+                    iv_msg_v3     = ls_message-msgv3
+                    iv_msg_v4     = ls_message-msgv4 ).
+
+                RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                  EXPORTING
+                    message_container = lo_exception.
+
+              ENDIF.
+
+          ENDTRY.
+
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->COMPARISONRATE01_GET_ENTITYSET
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING
+* | [--->] IT_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* | [--->] IS_PAGING                      TYPE        /IWBEP/S_MGW_PAGING
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH
+* | [--->] IT_ORDER                       TYPE        /IWBEP/T_MGW_SORTING_ORDER
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [--->] IV_SEARCH_STRING               TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITYSET(optional)
+* | [<---] ET_ENTITYSET                   TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESDTL
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD comparisonrate01_get_entityset.
+
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo,
+         lo_exception       TYPE REF TO /iwbep/if_message_container.
+
+    DATA:lv_project_id  TYPE zrpm_extid,
+         lv_material_no TYPE matnr.
+
+    IF it_filter_select_options IS NOT INITIAL.
+
+      IF line_exists( it_filter_select_options[ property = 'ProjectId' ] ).
+        DATA(lt_project_id) = it_filter_select_options[ property = 'ProjectId' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'Material' ] ).
+        DATA(lt_material) = it_filter_select_options[ property = 'Material' ]-select_options ##NO_TEXT.
+      ENDIF.
+
+    ENDIF.
+
+*Get header data
+    IF lt_project_id IS NOT INITIAL AND
+       lt_material IS NOT INITIAL.
+
+      lv_project_id  = lt_project_id[ 1 ]-low.
+      lv_material_no = lt_material[ 1 ]-low.
+
+*Map Bom Components data
+      IF lo_jor_estimate_bo IS NOT BOUND.
+        lo_jor_estimate_bo = NEW #( ).
+      ENDIF.
+
+      IF lo_jor_estimate_bo IS BOUND.
+        TRY.
+
+            lo_jor_estimate_bo->get_comparison_rates_detail(
+              EXPORTING
+                iv_project_id             = lv_project_id
+                iv_material_no            = lv_material_no
+              IMPORTING
+                et_comparisonrates_detail = et_entityset ).
+
+          CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+            DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+*Raise exception
+            me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+              RECEIVING
+                ro_message_container = lo_exception ).
+
+            IF lo_exception IS BOUND.
+              lo_exception->add_message(
+              EXPORTING
+                iv_msg_type   = ls_message-msgty
+                iv_msg_id     = ls_message-msgid
+                iv_msg_number = ls_message-msgno
+                iv_msg_v1     = ls_message-msgv1
+                iv_msg_v2     = ls_message-msgv2
+                iv_msg_v3     = ls_message-msgv3
+                iv_msg_v4     = ls_message-msgv4 ).
+
+              RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                EXPORTING
+                  message_container = lo_exception.
+
+            ENDIF.
+        ENDTRY.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->COMPARISONRATESS_GET_ENTITYSET
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING
+* | [--->] IT_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* | [--->] IS_PAGING                      TYPE        /IWBEP/S_MGW_PAGING
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH
+* | [--->] IT_ORDER                       TYPE        /IWBEP/T_MGW_SORTING_ORDER
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [--->] IV_SEARCH_STRING               TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITYSET(optional)
+* | [<---] ET_ENTITYSET                   TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESHDR
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD comparisonratess_get_entityset.
+
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo,
+         lo_exception       TYPE REF TO /iwbep/if_message_container.
+
+    DATA:lv_project_id        TYPE  zrpm_extid,
+         lv_material_category TYPE  zcharact.
+
+    DATA:lt_comparisonrates_header TYPE zcl_zodata_jor_estimat_mpc=>tt_comparisonrateshdr.
+
+    IF it_filter_select_options IS NOT INITIAL.
+
+      IF line_exists( it_filter_select_options[ property = 'ProjectId' ] ).
+        DATA(lt_project_id) = it_filter_select_options[ property = 'ProjectId' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'MaterialCategory' ] ).
+        DATA(lt_mat_cat) = it_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'Material' ] ).
+        DATA(lt_material) = it_filter_select_options[ property = 'Material' ]-select_options ##NO_TEXT.
+      ENDIF.
+
+    ELSE.
+
+*Convert filter string to select options
+      IF iv_filter_string IS NOT INITIAL.
+        convert_filter_string(
+          EXPORTING
+            iv_filter_string         = iv_filter_string
+          IMPORTING
+            et_filter_select_options = DATA(lt_filter_select_options) ).
+
+        IF lt_filter_select_options IS NOT INITIAL.
+
+          IF line_exists( lt_filter_select_options[ property = 'ProjectId' ] ).
+            lt_project_id = lt_filter_select_options[ property = 'ProjectId' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'MaterialCategory' ] ).
+            lt_mat_cat = lt_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'Material' ] ).
+            LOOP AT lt_filter_select_options ASSIGNING FIELD-SYMBOL(<lfs_select_options>) WHERE property EQ 'Material'.
+              APPEND LINES OF <lfs_select_options>-select_options TO lt_material.
+            ENDLOOP.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+*Get header data
+    IF lt_project_id IS NOT INITIAL AND
+       lt_mat_cat IS NOT INITIAL AND
+       lt_material IS NOT INITIAL.
+
+      lv_project_id        = lt_project_id[ 1 ]-low.
+      lv_material_category = lt_mat_cat[ 1 ]-low.
+
+*Map Bom Components data
+      IF lo_jor_estimate_bo IS NOT BOUND.
+        lo_jor_estimate_bo = NEW #( ).
+      ENDIF.
+
+      IF lo_jor_estimate_bo IS BOUND.
+        TRY.
+
+            lo_jor_estimate_bo->get_comparison_rates_header(
+              EXPORTING
+                iv_project_id             = lv_project_id
+                iv_material_category      = lv_material_category
+                it_material_no            = lt_material
+              IMPORTING
+                et_comparisonrates_header = lt_comparisonrates_header ).
+
+            LOOP AT lt_comparisonrates_header ASSIGNING FIELD-SYMBOL(<lfs_comparisonrates_header>).
+              APPEND INITIAL LINE TO et_entityset ASSIGNING FIELD-SYMBOL(<lfs_entityset>).
+              IF <lfs_entityset> IS ASSIGNED.
+                MOVE-CORRESPONDING <lfs_comparisonrates_header> TO <lfs_entityset>.
+                <lfs_entityset>-projectid        = lv_project_id.
+                <lfs_entityset>-materialcategory = lv_material_category.
+                <lfs_entityset>-material         = <lfs_comparisonrates_header>-itemnumber.
+              ENDIF.
+            ENDLOOP.
+
+          CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+            DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+*Raise exception
+            me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+              RECEIVING
+                ro_message_container = lo_exception ).
+
+            IF lo_exception IS BOUND.
+              lo_exception->add_message(
+              EXPORTING
+                iv_msg_type   = ls_message-msgty
+                iv_msg_id     = ls_message-msgid
+                iv_msg_number = ls_message-msgno
+                iv_msg_v1     = ls_message-msgv1
+                iv_msg_v2     = ls_message-msgv2
+                iv_msg_v3     = ls_message-msgv3
+                iv_msg_v4     = ls_message-msgv4 ).
+
+              RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                EXPORTING
+                  message_container = lo_exception.
+
+            ENDIF.
+        ENDTRY.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->CONVERT_FILTER_STRING
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [<---] ET_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD convert_filter_string.
+
+    DATA:lv_filter_string TYPE string.
+    DATA:ls_filter_string         TYPE string,
+         lt_filter_string         TYPE TABLE OF string,
+         lt_select_options        TYPE /iwbep/t_cod_select_options,
+         lt_filter_select_options TYPE /iwbep/t_mgw_select_option.
+
+    DATA:lv_name  TYPE string,
+         lv_value TYPE string,
+         lv_sign  TYPE string ##NEEDED.
+
+    CLEAR et_filter_select_options.
+
+    IF iv_filter_string IS NOT INITIAL.
+
+      lv_filter_string = iv_filter_string.
+
+      REPLACE ALL OCCURRENCES OF ')'   IN lv_filter_string WITH ''.
+      REPLACE ALL OCCURRENCES OF '('   IN lv_filter_string WITH ''.
+      REPLACE ALL OCCURRENCES OF `'`   IN lv_filter_string WITH space.
+      REPLACE ALL OCCURRENCES OF 'and' IN lv_filter_string WITH 'AND'.
+      REPLACE ALL OCCURRENCES OF 'eq'  IN lv_filter_string WITH 'EQ'.
+      SPLIT lv_filter_string AT 'AND' INTO TABLE lt_filter_string.
+
+*Build a table of key value pairs based on filter string
+      LOOP AT lt_filter_string INTO ls_filter_string.
+
+        CLEAR:lv_name,lv_sign,lv_value.
+        CONDENSE ls_filter_string.
+        SPLIT ls_filter_string AT ' ' INTO lv_name lv_sign lv_value.
+        TRANSLATE lv_sign TO UPPER CASE.
+
+        CLEAR lt_select_options.
+        APPEND INITIAL LINE TO lt_select_options ASSIGNING FIELD-SYMBOL(<lfs_select_options>).
+        IF <lfs_select_options> IS ASSIGNED.
+          <lfs_select_options>-sign   = 'I'.
+          <lfs_select_options>-option = 'EQ'.
+          <lfs_select_options>-low    = lv_value.
+        ENDIF.
+
+        APPEND INITIAL LINE TO lt_filter_select_options ASSIGNING FIELD-SYMBOL(<lfs_filter_select_options>).
+        IF <lfs_filter_select_options> IS ASSIGNED.
+          <lfs_filter_select_options>-property = lv_name.
+          <lfs_filter_select_options>-select_options = lt_select_options.
+        ENDIF.
+
+        CLEAR:ls_filter_string.
+      ENDLOOP.
+
+      et_filter_select_options = lt_filter_select_options.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->HEADERSET_GET_ENTITYSET
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING
+* | [--->] IT_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* | [--->] IS_PAGING                      TYPE        /IWBEP/S_MGW_PAGING
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH
+* | [--->] IT_ORDER                       TYPE        /IWBEP/T_MGW_SORTING_ORDER
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [--->] IV_SEARCH_STRING               TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITYSET(optional)
+* | [<---] ET_ENTITYSET                   TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_HEADER
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD headerset_get_entityset.
+
+    DATA:lt_data TYPE zcl_zodata_jor_estimat_mpc=>tt_header.
+
+    DATA:lo_exception TYPE REF TO /iwbep/if_message_container.
+
+    CLEAR:gt_selected_matnr,gt_bom_components.
+
+*Read Filters
+    IF it_filter_select_options IS NOT INITIAL.
+
+      IF line_exists( it_filter_select_options[ property = 'ProjectId' ] ).
+        DATA(lt_project_id) = it_filter_select_options[ property = 'ProjectId' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'MaterialCategory' ] ).
+        DATA(lt_mat_cat) = it_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'Material' ] ).
+        DATA(lt_material) = it_filter_select_options[ property = 'Material' ]-select_options  ##NO_TEXT.
+      ENDIF.
+
+    ELSE.
+
+*Convert filter string to select options
+      IF iv_filter_string IS NOT INITIAL.
+        convert_filter_string(
+          EXPORTING
+            iv_filter_string         = iv_filter_string
+          IMPORTING
+            et_filter_select_options = DATA(lt_filter_select_options) ).
+
+        IF lt_filter_select_options IS NOT INITIAL.
+
+          IF line_exists( lt_filter_select_options[ property = 'ProjectId' ] ).
+            lt_project_id = lt_filter_select_options[ property = 'ProjectId' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'MaterialCategory' ] ).
+            lt_mat_cat = lt_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'Material' ] ).
+            LOOP AT lt_filter_select_options ASSIGNING FIELD-SYMBOL(<lfs_select_options>) WHERE property EQ 'Material'.
+              APPEND LINES OF <lfs_select_options>-select_options TO lt_material.
+            ENDLOOP.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+*Get data using filters
+    IF lt_project_id IS NOT INITIAL AND
+       lt_mat_cat IS NOT INITIAL AND
+       lt_material IS NOT INITIAL.
+
+      SELECT zproj_id AS projectid,
+             mat_cat AS materialcategory,
+             zmat_no AS material,
+             zmat_desc AS materialdescription
+      FROM zde_estimate1
+      INTO TABLE @DATA(lt_estimate)
+      WHERE zproj_id IN @lt_project_id AND
+            mat_cat  IN @lt_mat_cat AND
+            zmat_no  IN @lt_material.
+      IF sy-subrc EQ 0.
+
+        SELECT SINGLE work_name
+        FROM zde_head
+        INTO @DATA(lv_proj_descr)
+        WHERE project_code IN @lt_project_id ##WARN_OK.
+        IF sy-subrc EQ 0.
+          DATA(lv_project_description) = lv_proj_descr.
+        ENDIF.
+
+        lt_data = VALUE #( FOR ls_estimate IN lt_estimate
+                         ( projectid           = ls_estimate-projectid
+                           materialcategory    = ls_estimate-materialcategory
+                           material            = ls_estimate-material
+                           materialdescription = ls_estimate-materialdescription
+                           projectdescription  = lv_project_description ) ).
+
+        et_entityset = lt_data.
+
+*Get selected material having data
+        gt_selected_matnr = VALUE #( FOR ls_data IN lt_data
+                                   ( sign   = 'I'
+                                     option = 'EQ'
+                                     low    = ls_data-material ) ).
+      ELSE.
+
+        IF lt_mat_cat[ 1 ]-low EQ 'CDSR'.
+          MESSAGE e002(zjor) INTO DATA(ls_message) ##NEEDED.
+        ELSEIF lt_mat_cat[ 1 ]-low EQ 'EDSR'.
+          MESSAGE e008(zjor) INTO ls_message.
+        ELSEIF lt_mat_cat[ 1 ]-low EQ 'HDSR'.
+          MESSAGE e009(zjor) INTO ls_message.
+        ENDIF.
+
+*Raise exception
+        me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+          RECEIVING
+            ro_message_container = lo_exception ).
+
+        IF lo_exception IS BOUND.
+          lo_exception->add_message(
+            EXPORTING
+              iv_msg_type   = sy-msgty
+              iv_msg_id     = sy-msgid
+              iv_msg_number = sy-msgno ).
+
+          RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+            EXPORTING
+              message_container = lo_exception.
+        ENDIF.
+
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZCL_ZODATA_JOR_ESTIMAT_DPC_EXT->JUSTIFIED_RATESE_GET_ENTITYSET
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_ENTITY_NAME                 TYPE        STRING
+* | [--->] IV_ENTITY_SET_NAME             TYPE        STRING
+* | [--->] IV_SOURCE_NAME                 TYPE        STRING
+* | [--->] IT_FILTER_SELECT_OPTIONS       TYPE        /IWBEP/T_MGW_SELECT_OPTION
+* | [--->] IS_PAGING                      TYPE        /IWBEP/S_MGW_PAGING
+* | [--->] IT_KEY_TAB                     TYPE        /IWBEP/T_MGW_NAME_VALUE_PAIR
+* | [--->] IT_NAVIGATION_PATH             TYPE        /IWBEP/T_MGW_NAVIGATION_PATH
+* | [--->] IT_ORDER                       TYPE        /IWBEP/T_MGW_SORTING_ORDER
+* | [--->] IV_FILTER_STRING               TYPE        STRING
+* | [--->] IV_SEARCH_STRING               TYPE        STRING
+* | [--->] IO_TECH_REQUEST_CONTEXT        TYPE REF TO /IWBEP/IF_MGW_REQ_ENTITYSET(optional)
+* | [<---] ET_ENTITYSET                   TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_JUSTIFIEDRATES
+* | [<---] ES_RESPONSE_CONTEXT            TYPE        /IWBEP/IF_MGW_APPL_SRV_RUNTIME=>TY_S_MGW_RESPONSE_CONTEXT
+* | [!CX!] /IWBEP/CX_MGW_BUSI_EXCEPTION
+* | [!CX!] /IWBEP/CX_MGW_TECH_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD justified_ratese_get_entityset.
+
+    DATA:lo_jor_estimate_bo TYPE REF TO zcl_zodata_jor_estimate_bo,
+         lo_exception       TYPE REF TO /iwbep/if_message_container.
+
+    DATA:lv_project_id        TYPE  zrpm_extid,
+         lv_material_category TYPE  zcharact.
+
+    DATA:lt_justifiedrates TYPE zcl_zodata_jor_estimat_mpc=>tt_justifiedrates.
+
+    IF it_filter_select_options IS NOT INITIAL.
+
+      IF line_exists( it_filter_select_options[ property = 'ProjectId' ] ).
+        DATA(lt_project_id) = it_filter_select_options[ property = 'ProjectId' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'MaterialCategory' ] ).
+        DATA(lt_mat_cat) = it_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+      ENDIF.
+
+      IF line_exists( it_filter_select_options[ property = 'Material' ] ).
+        DATA(lt_material) = it_filter_select_options[ property = 'Material' ]-select_options ##NO_TEXT.
+      ENDIF.
+
+    ELSE.
+
+*Convert filter string to select options
+      IF iv_filter_string IS NOT INITIAL.
+        convert_filter_string(
+          EXPORTING
+            iv_filter_string         = iv_filter_string
+          IMPORTING
+            et_filter_select_options = DATA(lt_filter_select_options) ).
+
+        IF lt_filter_select_options IS NOT INITIAL.
+
+          IF line_exists( lt_filter_select_options[ property = 'ProjectId' ] ).
+            lt_project_id = lt_filter_select_options[ property = 'ProjectId' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'MaterialCategory' ] ).
+            lt_mat_cat = lt_filter_select_options[ property = 'MaterialCategory' ]-select_options.
+          ENDIF.
+
+          IF line_exists( lt_filter_select_options[ property = 'Material' ] ).
+            LOOP AT lt_filter_select_options ASSIGNING FIELD-SYMBOL(<lfs_select_options>) WHERE property EQ 'Material'.
+              APPEND LINES OF <lfs_select_options>-select_options TO lt_material.
+            ENDLOOP.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+*Get header data
+    IF lt_project_id IS NOT INITIAL AND
+       lt_mat_cat IS NOT INITIAL AND
+       lt_material IS NOT INITIAL.
+
+      lv_project_id        = lt_project_id[ 1 ]-low.
+      lv_material_category = lt_mat_cat[ 1 ]-low.
+
+*Map Bom Components data
+      IF lo_jor_estimate_bo IS NOT BOUND.
+        lo_jor_estimate_bo = NEW #( ).
+      ENDIF.
+
+      IF lo_jor_estimate_bo IS BOUND.
+        TRY.
+
+            lo_jor_estimate_bo->get_justified_rates(
+              EXPORTING
+                iv_project_id             = lv_project_id
+                iv_material_category      = lv_material_category
+                it_material_no            = lt_material
+              IMPORTING
+                et_justifiedrates         = lt_justifiedrates ).
+
+            LOOP AT lt_justifiedrates ASSIGNING FIELD-SYMBOL(<lfs_justifiedrates>).
+              APPEND INITIAL LINE TO et_entityset ASSIGNING FIELD-SYMBOL(<lfs_entityset>).
+              IF <lfs_entityset> IS ASSIGNED.
+                MOVE-CORRESPONDING <lfs_justifiedrates> TO <lfs_entityset>.
+                <lfs_entityset>-projectid        = lv_project_id.
+                <lfs_entityset>-materialcategory = lv_material_category.
+                <lfs_entityset>-material         = <lfs_justifiedrates>-itemnumber.
+              ENDIF.
+            ENDLOOP.
+
+          CATCH zcx_jor_exception INTO DATA(lo_jor_exception).
+            DATA(ls_message) = lo_jor_exception->read_exception( ).
+
+*Raise exception
+            me->/iwbep/if_mgw_conv_srv_runtime~get_message_container(
+              RECEIVING
+                ro_message_container = lo_exception ).
+
+            IF lo_exception IS BOUND.
+              lo_exception->add_message(
+              EXPORTING
+                iv_msg_type   = ls_message-msgty
+                iv_msg_id     = ls_message-msgid
+                iv_msg_number = ls_message-msgno
+                iv_msg_v1     = ls_message-msgv1
+                iv_msg_v2     = ls_message-msgv2
+                iv_msg_v3     = ls_message-msgv3
+                iv_msg_v4     = ls_message-msgv4 ).
+
+              RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+                EXPORTING
+                  message_container = lo_exception.
+
+            ENDIF.
+        ENDTRY.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.
