@@ -1,0 +1,679 @@
+Sample code to call a external URL and get data from it in ABAP
+
+*&---------------------------------------------------------------------*
+*& Report ZHCM_ERPAPI_REPORT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zhcm_erpapi_report.
+
+TYPES:BEGIN OF ty_data,
+        emp_id                 TYPE  string,
+        dob                    TYPE  string,
+        f_name                 TYPE  string,
+        m_name                 TYPE  string,
+        l_name                 TYPE  string,
+        cader                  TYPE  string,
+        category               TYPE  string,
+        gender                 TYPE  string,
+        examination            TYPE  string,
+        subject                TYPE  string,
+        posting_date_delhi     TYPE  string,
+        mobile_no              TYPE  string,
+        cur_address            TYPE  string,
+        cur_city               TYPE  string,
+        cur_state              TYPE  string,
+        cur_pin                TYPE  string,
+        cur_phone              TYPE  string,
+        email                  TYPE  string,
+        peraddress             TYPE  string,
+        percity                TYPE  string,
+        perstate               TYPE  string,
+        perpin                 TYPE  string,
+        perphone               TYPE  string,
+        office_phone           TYPE  string,
+        father_name            TYPE  string,
+        initial_designation    TYPE  string,
+        phy_disability         TYPE  string,
+        appointment_type       TYPE  string,
+        dicipline              TYPE  string,
+        app_letterref          TYPE  string,
+        date_of_inijoin        TYPE  string,
+        exservice_man          TYPE  string,
+        percentage_disability  TYPE  string,
+        track_date             TYPE  string,
+        post_code              TYPE  string,
+        group_code             TYPE  string,
+        branch_phy             TYPE  string,
+        branch_code            TYPE  string,
+        transferid             TYPE  string,
+        status                 TYPE  string,
+        sanction_order_no      TYPE  string,
+        group_name             TYPE  string,
+        increment_date         TYPE  string,
+        provident_fund_no      TYPE  string,
+        gazetted               TYPE  string,
+        vech_facility          TYPE  string,
+        pay_id                 TYPE  string,
+        scale                  TYPE  string,
+        basic_pay              TYPE  string,
+        salary_group           TYPE  string,
+        grade                  TYPE  string,
+        degree1                TYPE  string,
+        degree2                TYPE  string,
+        degree3                TYPE  string,
+        degree4                TYPE  string,
+        degree5                TYPE  string,
+        degree1_year           TYPE  string,
+        degree2_year           TYPE  string,
+        degree3_year           TYPE  string,
+        degree4_year           TYPE  string,
+        subject2               TYPE  string,
+        subject1               TYPE  string,
+        subject4               TYPE  string,
+        subject3               TYPE  string,
+        subject5               TYPE  string,
+        degree5_year           TYPE  string,
+        ecs                    TYPE  string,
+        cur_designation        TYPE  string,
+        mstatus                TYPE  string,
+        posting_station        TYPE  string,
+        sub_division           TYPE  string,
+        pwd_since_date         TYPE  string,
+        field_specialisation1  TYPE  string,
+        field_specialisation2  TYPE  string,
+        field_specialisation3  TYPE  string,
+        sp_detail1             TYPE  string,
+        sp_detail2             TYPE  string,
+        sp_detail3             TYPE  string,
+        emp_password           TYPE  string,
+        posting_state          TYPE  string,
+        posting_pin            TYPE  string,
+        present_date           TYPE  string,
+        inchat                 TYPE  string,
+        increment_effect_from  TYPE  string,
+        old_increment_date     TYPE  string,
+        off_city               TYPE  string,
+        off_state              TYPE  string,
+        off_pin                TYPE  string,
+        off_street             TYPE  string,
+        emp_off_name           TYPE  string,
+        off_phone2             TYPE  string,
+        off_email              TYPE  string,
+        emp_off_fax            TYPE  string,
+        title                  TYPE  string,
+        residing_one           TYPE  string,
+        govt_accomodation      TYPE  string,
+        hard_area              TYPE  string,
+        retainat_old_station   TYPE  string,
+        posting_stn_old        TYPE  string,
+        salary_check           TYPE  string,
+        competent_check        TYPE  string,
+        competent_branch       TYPE  string,
+        competent_chkdate      TYPE  string,
+        it_freezing            TYPE  string,
+        destination_acc        TYPE  string,
+        basic_pay_new          TYPE  string,
+        alt_pims_id            TYPE  string,
+        prano                  TYPE  string,
+        ref_to_new_name        TYPE  string,
+        new_name               TYPE  string,
+        original_name          TYPE  string,
+        fellow                 TYPE  string,
+        member                 TYPE  string,
+        sewa_id                TYPE  string,
+        cpwd_id                TYPE  string,
+        count_rel              TYPE  string,
+        count_join             TYPE  string,
+        pan_no                 TYPE  string,
+        contractor_id          TYPE  string,
+        emp_password_new       TYPE  string,
+        stdres                 TYPE  string,
+        cpwd_type              TYPE  string,
+        uid                    TYPE  string,
+        password_change_date   TYPE  string,
+        emp_old_password       TYPE  string,
+        apar_password          TYPE  string,
+        apar_passwordcreatedon TYPE  string,
+        post1incrementdate     TYPE  string,
+        joiningletter          TYPE  string,
+        appointmentletter      TYPE  string,
+        dobcertificate         TYPE  string,
+        pancertificate         TYPE  string,
+        aadharcertificate      TYPE  string,
+        isverify               TYPE  string,
+        verify                 TYPE  string,
+        verifyby               TYPE  string,
+        verifyon               TYPE  string,
+      END OF ty_data.
+
+DATA:gv_psg_idnum  TYPE psg_idnum,
+     lv_token_time TYPE sy-uzeit,
+     ls_data       TYPE ty_data,
+     lt_data       TYPE STANDARD TABLE OF ty_data.
+
+DATA:lo_alv         TYPE REF TO cl_salv_table,
+     lo_column      TYPE REF TO cl_salv_column,
+     lo_alv_toolbar TYPE REF TO cl_salv_functions_list,
+     lo_cols        TYPE REF TO cl_salv_columns.
+
+DATA:table_descr    TYPE REF TO cl_abap_tabledescr,
+     struct_descr   TYPE REF TO cl_abap_structdescr,
+     columns        TYPE abap_compdescr_tab,
+     lv_long_text   TYPE scrtext_l,
+     lv_medium_text TYPE scrtext_m,
+     lv_short_text  TYPE scrtext_s.
+
+SELECT-OPTIONS:p_pimsid FOR gv_psg_idnum NO INTERVALS OBLIGATORY.
+
+CLASS lcl_erpapireport DEFINITION FINAL.
+
+  PUBLIC SECTION.
+
+    TYPES:BEGIN OF ty_token,
+            access_token TYPE string,
+            token_type   TYPE char10,
+            expires_in   TYPE char2,
+          END OF ty_token.
+
+    TYPES:BEGIN OF ty_data,
+            emp_id                 TYPE  string,
+            dob                    TYPE  string,
+            f_name                 TYPE  string,
+            m_name                 TYPE  string,
+            l_name                 TYPE  string,
+            cader                  TYPE  string,
+            category               TYPE  string,
+            gender                 TYPE  string,
+            examination            TYPE  string,
+            subject                TYPE  string,
+            posting_date_delhi     TYPE  string,
+            mobile_no              TYPE  string,
+            cur_address            TYPE  string,
+            cur_city               TYPE  string,
+            cur_state              TYPE  string,
+            cur_pin                TYPE  string,
+            cur_phone              TYPE  string,
+            email                  TYPE  string,
+            peraddress             TYPE  string,
+            percity                TYPE  string,
+            perstate               TYPE  string,
+            perpin                 TYPE  string,
+            perphone               TYPE  string,
+            office_phone           TYPE  string,
+            father_name            TYPE  string,
+            initial_designation    TYPE  string,
+            phy_disability         TYPE  string,
+            appointment_type       TYPE  string,
+            dicipline              TYPE  string,
+            app_letterref          TYPE  string,
+            date_of_inijoin        TYPE  string,
+            exservice_man          TYPE  string,
+            percentage_disability  TYPE  string,
+            track_date             TYPE  string,
+            post_code              TYPE  string,
+            group_code             TYPE  string,
+            branch_phy             TYPE  string,
+            branch_code            TYPE  string,
+            transferid             TYPE  string,
+            status                 TYPE  string,
+            sanction_order_no      TYPE  string,
+            group_name             TYPE  string,
+            increment_date         TYPE  string,
+            provident_fund_no      TYPE  string,
+            gazetted               TYPE  string,
+            vech_facility          TYPE  string,
+            pay_id                 TYPE  string,
+            scale                  TYPE  string,
+            basic_pay              TYPE  string,
+            salary_group           TYPE  string,
+            grade                  TYPE  string,
+            degree1                TYPE  string,
+            degree2                TYPE  string,
+            degree3                TYPE  string,
+            degree4                TYPE  string,
+            degree5                TYPE  string,
+            degree1_year           TYPE  string,
+            degree2_year           TYPE  string,
+            degree3_year           TYPE  string,
+            degree4_year           TYPE  string,
+            subject2               TYPE  string,
+            subject1               TYPE  string,
+            subject4               TYPE  string,
+            subject3               TYPE  string,
+            subject5               TYPE  string,
+            degree5_year           TYPE  string,
+            ecs                    TYPE  string,
+            cur_designation        TYPE  string,
+            mstatus                TYPE  string,
+            posting_station        TYPE  string,
+            sub_division           TYPE  string,
+            pwd_since_date         TYPE  string,
+            field_specialisation1  TYPE  string,
+            field_specialisation2  TYPE  string,
+            field_specialisation3  TYPE  string,
+            sp_detail1             TYPE  string,
+            sp_detail2             TYPE  string,
+            sp_detail3             TYPE  string,
+            emp_password           TYPE  string,
+            posting_state          TYPE  string,
+            posting_pin            TYPE  string,
+            present_date           TYPE  string,
+            inchat                 TYPE  string,
+            increment_effect_from  TYPE  string,
+            old_increment_date     TYPE  string,
+            off_city               TYPE  string,
+            off_state              TYPE  string,
+            off_pin                TYPE  string,
+            off_street             TYPE  string,
+            emp_off_name           TYPE  string,
+            off_phone2             TYPE  string,
+            off_email              TYPE  string,
+            emp_off_fax            TYPE  string,
+            title                  TYPE  string,
+            residing_one           TYPE  string,
+            govt_accomodation      TYPE  string,
+            hard_area              TYPE  string,
+            retainat_old_station   TYPE  string,
+            posting_stn_old        TYPE  string,
+            salary_check           TYPE  string,
+            competent_check        TYPE  string,
+            competent_branch       TYPE  string,
+            competent_chkdate      TYPE  string,
+            it_freezing            TYPE  string,
+            destination_acc        TYPE  string,
+            basic_pay_new          TYPE  string,
+            alt_pims_id            TYPE  string,
+            prano                  TYPE  string,
+            ref_to_new_name        TYPE  string,
+            new_name               TYPE  string,
+            original_name          TYPE  string,
+            fellow                 TYPE  string,
+            member                 TYPE  string,
+            sewa_id                TYPE  string,
+            cpwd_id                TYPE  string,
+            count_rel              TYPE  string,
+            count_join             TYPE  string,
+            pan_no                 TYPE  string,
+            contractor_id          TYPE  string,
+            emp_password_new       TYPE  string,
+            stdres                 TYPE  string,
+            cpwd_type              TYPE  string,
+            uid                    TYPE  string,
+            password_change_date   TYPE  string,
+            emp_old_password       TYPE  string,
+            apar_password          TYPE  string,
+            apar_passwordcreatedon TYPE  string,
+            post1incrementdate     TYPE  string,
+            joiningletter          TYPE  string,
+            appointmentletter      TYPE  string,
+            dobcertificate         TYPE  string,
+            pancertificate         TYPE  string,
+            aadharcertificate      TYPE  string,
+            isverify               TYPE  string,
+            verify                 TYPE  string,
+            verifyby               TYPE  string,
+            verifyon               TYPE  string,
+          END OF ty_data.
+
+    TYPES:BEGIN OF ty_deserialize_resp,
+            content         TYPE string,
+            contentencoding TYPE fref,
+            contenttype     TYPE string,
+          END OF ty_deserialize_resp.
+
+    DATA: lv_url              TYPE string,
+          lv_body             TYPE string,
+          lv_response         TYPE string,
+          lv_access_token     TYPE string,
+          ls_receive          TYPE ty_token,
+          ls_deserialize_resp TYPE ty_deserialize_resp.
+
+    DATA:lo_http_client TYPE REF TO if_http_client,
+         lo_rest_client TYPE REF TO cl_rest_http_client,
+         lo_response    TYPE REF TO if_rest_entity,
+         lo_request     TYPE REF TO if_rest_entity.
+
+    METHODS:get_token EXPORTING ev_token TYPE string.
+
+    METHODS:get_data  IMPORTING iv_access_token TYPE string
+                                iv_pimsid       TYPE psg_idnum
+                      EXPORTING es_data         TYPE ty_data.
+
+ENDCLASS.
+
+CLASS lcl_erpapireport IMPLEMENTATION.
+
+  METHOD get_token.
+
+    CLEAR ev_token.
+
+*Clear reference variables
+    IF lo_http_client IS BOUND.
+      CLEAR lo_http_client.
+    ENDIF.
+
+    IF lo_http_client IS BOUND.
+      CLEAR lo_http_client.
+    ENDIF.
+
+    IF lo_request IS BOUND.
+      CLEAR lo_request.
+    ENDIF.
+
+    IF lo_response IS BOUND.
+      CLEAR lo_response.
+    ENDIF.
+
+*Instantiate HTTP client
+    CALL METHOD cl_http_client=>create_by_url
+      EXPORTING
+        url                = 'https://cpwdpims.nic.in'
+      IMPORTING
+        client             = lo_http_client
+      EXCEPTIONS
+        argument_not_found = 1
+        plugin_not_active  = 2
+        internal_error     = 3
+        pse_not_found      = 4
+        pse_not_distrib    = 5
+        pse_errors         = 6
+        OTHERS             = 7.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+*Instantiate REST client
+    CREATE OBJECT lo_rest_client
+      EXPORTING
+        io_http_client = lo_http_client.
+
+*Set version
+    IF lo_http_client IS BOUND.
+      lo_http_client->request->set_version( if_http_request=>co_protocol_version_1_0 ).
+    ENDIF.
+
+*Set request URI options
+    IF lo_http_client IS BOUND AND lo_rest_client IS BOUND.
+      lv_url = '/erpapi/api/token'.
+      cl_http_utility=>set_request_uri(
+        EXPORTING
+          request = lo_http_client->request
+          uri     = lv_url
+      ).
+    ENDIF.
+
+*Set request headers
+    IF lo_rest_client IS BOUND.
+      CALL METHOD lo_rest_client->if_rest_client~set_request_header
+        EXPORTING
+          iv_name  = 'Content-Type' ##NO_TEXT
+          iv_value = 'text/plain'.
+    ENDIF.
+
+*Set request body
+    lo_request = lo_rest_client->if_rest_client~create_request_entity( ).
+    lv_body = 'grant_type=password&username=CPWDERPAPiLOGIN&password=CPWD@ERPTOKENLogin'.
+
+    IF lo_request IS BOUND.
+      lo_request->set_string_data( lv_body ).
+    ENDIF.
+
+*Send request for POST operation
+    lo_rest_client->if_rest_resource~post( lo_request ).
+
+* Collect response
+    lo_response = lo_rest_client->if_rest_client~get_response_entity( ).
+*    http_status = lv_status = lo_response->get_header_field( '~status_code' ).
+*    reason = lo_response->get_header_field( '~status_reason' ).
+*    content_length = lo_response->get_header_field( 'content-length' ).
+*    location = lo_response->get_header_field( 'location' ).
+*    content_type = lo_response->get_header_field( 'content-type' ).
+
+    IF lo_response IS BOUND.
+
+      CLEAR lv_response.
+      lv_response = lo_response->get_string_data( ).
+
+      IF lv_response IS NOT INITIAL.
+        CLEAR ls_receive.
+        /ui2/cl_json=>deserialize(
+          EXPORTING
+            json             = lv_response
+          CHANGING
+            data             = ls_receive ).
+
+        IF ls_receive IS NOT INITIAL.
+          ev_token = ls_receive-access_token.
+        ENDIF.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD get_data.
+
+    CLEAR es_data.
+
+*Clear reference variables
+    IF lo_http_client IS BOUND.
+      CLEAR lo_http_client.
+    ENDIF.
+
+    IF lo_rest_client IS BOUND.
+      CLEAR lo_rest_client.
+    ENDIF.
+
+    CALL METHOD cl_http_client=>create_by_url
+      EXPORTING
+        url                = 'https://cpwdpims.nic.in'
+      IMPORTING
+        client             = lo_http_client
+      EXCEPTIONS
+        argument_not_found = 1
+        plugin_not_active  = 2
+        internal_error     = 3
+        pse_not_found      = 4
+        pse_not_distrib    = 5
+        pse_errors         = 6
+        OTHERS             = 7.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+
+*Instantiate REST client
+    CREATE OBJECT lo_rest_client
+      EXPORTING
+        io_http_client = lo_http_client.
+
+*Set version
+    IF lo_http_client IS BOUND.
+      lo_http_client->request->set_version( if_http_request=>co_protocol_version_1_0 ).
+    ENDIF.
+
+*Set request URI options
+    IF lo_http_client IS BOUND AND lo_rest_client IS BOUND.
+*        lv_url = '/erpapi/api/employee/PMU25051966PEON051995'.
+      lv_url = '/erpapi/api/employee/' && iv_pimsid.
+      cl_http_utility=>set_request_uri(
+        EXPORTING
+          request = lo_http_client->request
+          uri     = lv_url ).
+    ENDIF.
+
+    CLEAR lv_access_token.
+    CONCATENATE 'Bearer' iv_access_token INTO lv_access_token SEPARATED BY space ##NO_TEXT.
+
+*Set request headers
+    IF lo_http_client IS BOUND.
+      lo_http_client->request->set_header_field(
+      EXPORTING
+      name =  'Authorization'    ##NO_TEXT
+      value = lv_access_token ).
+    ENDIF.
+
+*Send GET operation
+    IF lo_http_client IS BOUND.
+      lo_http_client->request->set_method( 'GET' ).
+    ENDIF.
+
+*Set request
+    CALL METHOD lo_http_client->send
+      EXCEPTIONS
+        http_communication_failure = 1
+        http_invalid_state         = 2
+        http_processing_failed     = 3
+        http_invalid_timeout       = 4
+        OTHERS                     = 5.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+*Receive response
+    CALL METHOD lo_http_client->receive
+      EXCEPTIONS
+        http_communication_failure = 1
+        http_invalid_state         = 2
+        http_processing_failed     = 3
+        OTHERS                     = 4.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+*Get json response
+    CALL METHOD lo_http_client->response->get_cdata
+      RECEIVING
+        data = DATA(ls_response).
+
+*Deserialize json response
+    CLEAR ls_deserialize_resp.
+    CALL METHOD /ui2/cl_json=>deserialize
+      EXPORTING
+        json         = ls_response
+        pretty_name  = /ui2/cl_json=>pretty_mode-user
+        assoc_arrays = abap_true
+      CHANGING
+        data         = ls_deserialize_resp.
+
+    REPLACE ALL OCCURRENCES OF '[' IN ls_deserialize_resp-content WITH space.
+    REPLACE ALL OCCURRENCES OF ']' IN ls_deserialize_resp-content WITH space.
+    CONDENSE ls_deserialize_resp-content.
+
+*Deserialize json response content string
+    CALL METHOD /ui2/cl_json=>deserialize
+      EXPORTING
+        json         = ls_deserialize_resp-content
+        pretty_name  = /ui2/cl_json=>pretty_mode-user
+        assoc_arrays = abap_true
+      CHANGING
+        data         = es_data.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+START-OF-SELECTION.
+
+  DATA:lo_erpapireport TYPE REF TO lcl_erpapireport.
+
+*Get data
+*-----------------------------------------------------------------------------------------
+  IF p_pimsid IS NOT INITIAL.
+
+    lo_erpapireport = NEW #( ).
+
+*Get access token
+    IF lo_erpapireport IS BOUND.
+      lo_erpapireport->get_token( IMPORTING ev_token = DATA(lv_access_token) ).
+    ENDIF.
+
+*Get token validity time
+    lv_token_time = sy-uzeit + 55.
+
+*Get data using access token
+    CLEAR lt_data.
+    LOOP AT p_pimsid ASSIGNING FIELD-SYMBOL(<lfs_pimsid>).
+      IF lo_erpapireport IS BOUND AND lv_access_token IS NOT INITIAL.
+
+        IF lv_token_time EQ sy-uzeit.
+          CLEAR lv_access_token.
+
+*Get access token
+          IF lo_erpapireport IS BOUND.
+            lo_erpapireport->get_token( IMPORTING ev_token = lv_access_token ).
+
+            CLEAR lv_token_time.
+            lv_token_time = sy-uzeit + 55.
+          ENDIF.
+        ENDIF.
+
+        IF lv_access_token IS NOT INITIAL.
+          lo_erpapireport->get_data( EXPORTING iv_access_token = lv_access_token
+                                               iv_pimsid       = <lfs_pimsid>-low
+                                     IMPORTING es_data         = ls_data ).
+        ENDIF.
+
+        APPEND ls_data TO lt_data.
+        CLEAR ls_data.
+      ENDIF.
+    ENDLOOP.
+*-----------------------------------------------------------------------------------------
+
+*Frontend execution mode
+*-----------------------------------------------------------------------------------------
+    IF sy-batch EQ abap_false.
+
+*Display data in ALV
+      IF lt_data IS NOT INITIAL.
+        TRY.
+            cl_salv_table=>factory(
+              IMPORTING
+                r_salv_table = lo_alv
+              CHANGING
+                t_table      = lt_data ).
+
+*Add column heading
+            lo_cols = lo_alv->get_columns( ).
+            lo_cols->set_optimize( abap_true ).
+
+*Get columns
+            table_descr ?= cl_abap_typedescr=>describe_by_data( lt_data ).
+            struct_descr ?= table_descr->get_table_line_type( ).
+            columns = struct_descr->components.
+
+            LOOP AT columns ASSIGNING FIELD-SYMBOL(<lfs_column>).
+              TRY.
+                  lo_column = lo_cols->get_column( <lfs_column>-name ).
+
+                  CLEAR lv_long_text.
+                  lv_long_text = <lfs_column>-name.
+                  lo_column->set_long_text( lv_long_text ).
+
+                  CLEAR lv_medium_text.
+                  lv_medium_text = <lfs_column>-name.
+                  lo_column->set_medium_text( lv_medium_text ).
+
+                  CLEAR lv_short_text.
+                  lv_short_text = <lfs_column>-name.
+                  lo_column->set_short_text( lv_short_text ).
+
+                CATCH cx_salv_not_found.
+              ENDTRY.
+            ENDLOOP.
+
+*Set default toolbar
+            lo_alv_toolbar = lo_alv->get_functions( ).
+            lo_alv_toolbar->set_all(
+                value = if_salv_c_bool_sap=>true ).
+
+            lo_alv->display( ).
+
+          CATCH cx_salv_msg INTO DATA(lx_msg) ##NEEDED.
+        ENDTRY.
+      ENDIF.
+
+    ENDIF.
+*-----------------------------------------------------------------------------------------
+
+  ENDIF.
