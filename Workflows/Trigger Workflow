@@ -1,0 +1,83 @@
+  METHOD trigger_workflow.
+
+    DATA:lv_objtype          TYPE sibftypeid,
+         lv_event            TYPE sibfevent,
+         lv_objkey           TYPE sibfinstid,
+         lv_param_name       TYPE swfdname,
+         lo_event_parameters TYPE REF TO if_swf_ifs_parameter_container.
+
+* Setting values of Event Name
+    lv_objtype = 'ZWF_SEND_ORDERS_NOTIFICATION'.
+    lv_event   = 'TRIGGER'.
+
+*Instantiate event container
+    cl_swf_evt_event=>get_event_container(
+      EXPORTING
+        im_objcateg  = cl_swf_evt_event=>mc_objcateg_cl
+        im_objtype   = lv_objtype
+        im_event     = lv_event
+      RECEIVING
+        re_reference = lo_event_parameters ).
+
+*Set the parameter value in the event conainer
+    TRY.
+        lv_param_name = 'ORDER_TYPE'.
+        CALL METHOD lo_event_parameters->set
+          EXPORTING
+            name  = lv_param_name
+            value = iv_order_type.
+
+        CLEAR lv_param_name.
+        lv_param_name ='RECIPIENTS'.
+        CALL METHOD lo_event_parameters->set
+          EXPORTING
+            name  = lv_param_name
+            value = it_recipients.
+
+        CLEAR lv_param_name.
+        lv_param_name ='ORDERNO'.
+        CALL METHOD lo_event_parameters->set
+          EXPORTING
+            name  = lv_param_name
+            value = iv_order_no.
+
+        CLEAR lv_param_name.
+        lv_param_name ='PERSONALNO'.
+        CALL METHOD lo_event_parameters->set
+          EXPORTING
+            name  = lv_param_name
+            value = iv_pernr.
+
+        CLEAR lv_param_name.
+        lv_param_name ='INITIATOR'.
+        CALL METHOD lo_event_parameters->set
+          EXPORTING
+            name  = lv_param_name
+            value = iv_initiator.
+
+      CATCH cx_swf_cnt_cont_access_denied.
+      CATCH cx_swf_cnt_elem_access_denied.
+      CATCH cx_swf_cnt_elem_not_found.
+      CATCH cx_swf_cnt_elem_type_conflict.
+      CATCH cx_swf_cnt_unit_type_conflict.
+      CATCH cx_swf_cnt_elem_def_invalid.
+      CATCH cx_swf_cnt_container.
+    ENDTRY.
+
+
+* Raise event to trigger workflow
+    TRY.
+        cl_swf_evt_event=>raise(
+           EXPORTING
+             im_objcateg        = cl_swf_evt_event=>mc_objcateg_cl
+             im_objtype         = lv_objtype
+             im_event           = lv_event
+             im_objkey          = space
+             im_event_container = lo_event_parameters ).
+      CATCH cx_swf_evt_invalid_objtype .
+      CATCH cx_swf_evt_invalid_event .
+    ENDTRY.
+
+    COMMIT WORK.
+
+  ENDMETHOD.
