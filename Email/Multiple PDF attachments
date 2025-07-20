@@ -1,0 +1,90 @@
+ALV with custom toolbar button handling 
+
+METHOD display_ageing_output. 
+ 
+    DATA:lo_alv          TYPE REF TO cl_salv_table, 
+         lo_column       TYPE REF TO cl_salv_column, 
+         lo_alv_toolbar  TYPE REF TO cl_salv_functions_list, 
+         lo_cols         TYPE REF TO cl_salv_columns, 
+         lo_table_descr  TYPE REF TO cl_abap_tabledescr, 
+         lo_struct_descr TYPE REF TO cl_abap_structdescr, 
+         lo_events       TYPE REF TO cl_salv_events_table. 
+ 
+    DATA:lv_long_text   TYPE scrtext_l, 
+         lv_medium_text TYPE scrtext_m, 
+         lv_short_text  TYPE scrtext_s. 
+ 
+    DATA:lt_columns TYPE abap_compdescr_tab. 
+ 
+    IF gt_ageing_data IS NOT INITIAL. 
+      TRY. 
+          cl_salv_table=>factory( 
+            IMPORTING 
+              r_salv_table = lo_alv 
+            CHANGING 
+              t_table      = gt_ageing_data ). 
+ 
+*Set PF status 
+          SET PF-STATUS 'STANDARD'. 
+          lo_alv->set_screen_status( 
+            pfstatus      = 'STANDARD' 
+            report        = sy-repid 
+            set_functions = lo_alv->c_functions_all ). 
+ 
+*Events 
+          lo_events = lo_alv->get_event( ). 
+          CREATE OBJECT go_event_handler. 
+          SET HANDLER go_event_handler->on_click FOR lo_events. 
+ 
+*Add column heading 
+          lo_cols = lo_alv->get_columns( ). 
+          lo_cols->set_optimize( abap_true ). 
+ 
+*Get columns 
+          lo_table_descr ?= cl_abap_typedescr=>describe_by_data( gt_ageing_data ). 
+          lo_struct_descr ?= lo_table_descr->get_table_line_type( ). 
+          lt_columns = lo_struct_descr->components. 
+ 
+          LOOP AT lt_columns ASSIGNING FIELD-SYMBOL(<lfs_column>). 
+            TRY. 
+                lo_column = lo_cols->get_column( <lfs_column>-name ). 
+ 
+                IF <lfs_column>-name EQ 'QUALITY_CATEGORY' OR 
+                   <lfs_column>-name EQ 'PRODUCT_CATEGORY'. 
+                  lo_column->set_visible( value = if_salv_c_bool_sap=>false ). 
+                  CONTINUE. 
+                ENDIF. 
+ 
+                CLEAR:lv_long_text, 
+                      lv_medium_text, 
+                      lv_short_text. 
+ 
+                IF <lfs_column>-name EQ 'PLANT'. 
+                  lv_long_text   = TEXT-011. 
+                  lv_medium_text = TEXT-011. 
+                  lv_short_text  = TEXT-011. 
+                ENDIF. 
+ 
+                lo_column->set_long_text( lv_long_text ). 
+                lo_column->set_medium_text( lv_medium_text ). 
+                lo_column->set_short_text( lv_short_text ). 
+ 
+              CATCH cx_salv_not_found. 
+            ENDTRY. 
+          ENDLOOP. 
+ 
+*Set default toolbar 
+          lo_alv_toolbar = lo_alv->get_functions( ). 
+ 
+          lo_alv_toolbar->set_all( value = if_salv_c_bool_sap=>true ). 
+ 
+          lo_alv->display( ). 
+ 
+        CATCH cx_salv_msg INTO DATA(lx_msg). 
+      ENDTRY. 
+    ELSE. 
+      MESSAGE s013(zmm01) DISPLAY LIKE 'E'. 
+      LEAVE LIST-PROCESSING. 
+    ENDIF. 
+ 
+  ENDMETHOD. 
