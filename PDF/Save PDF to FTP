@@ -1,0 +1,1145 @@
+Transfer PDF files to FTP server
+
+class ZCL_INVOICE_ATTACH_SAP_TO_BOLT definition
+  public
+  final
+  create private .
+
+public section.
+
+  methods CONSTRUCTOR
+    importing
+      !IV_APP_SERVER_PATH type DMS_FILEPATH
+      !IV_FTP_SERVER_PATH type DMS_FILEPATH .
+  class-methods GET_INSTANCE
+    importing
+      !IV_APP_SERVER_PATH type DMS_FILEPATH
+      !IV_FTP_SERVER_PATH type DMS_FILEPATH
+    returning
+      value(RO_INSTANCE) type ref to ZCL_INVOICE_ATTACH_SAP_TO_BOLT .
+  methods SEND_INVOICE_ATTACHMENTS .
+protected section.
+PRIVATE SECTION.
+
+  TYPES:
+    BEGIN OF gty_cmfp,
+      msgv1     TYPE cmfp-msgv1,
+      rqcretime TYPE tsp01-rqcretime,
+    END OF gty_cmfp .
+  TYPES:
+    BEGIN OF gty_spool_data,
+      bukrs TYPE vbrk-bukrs,
+      objky TYPE nast-objky,
+      msgv1 TYPE cmfp-msgv1,
+    END OF gty_spool_data .
+  TYPES:
+    BEGIN OF gty_fi_spool_id,
+      bukrs     TYPE zfia_tax_invoice-bukrs,
+      belnr     TYPE zfia_tax_invoice-belnr,
+      timestamp TYPE zfia_tax_invoice-timestamp,
+      spoolid   TYPE zfia_tax_invoice-spoolid,
+    END OF gty_fi_spool_id .
+  TYPES:
+    gty_pdf_table(1000) TYPE x .
+  TYPES:
+    BEGIN OF gty_objky,
+      objky TYPE nast-objky,
+    END OF gty_objky .
+  TYPES:
+    BEGIN OF gty_rqident,
+      rqident TYPE tsp01-rqident,
+    END OF gty_rqident .
+  TYPES:
+    BEGIN OF gty_tsp01,
+      rqident   TYPE rspoid,
+      rqmodtime TYPE rspomodtim,
+    END OF gty_tsp01 .
+
+  DATA:
+    gt_spool_data  TYPE STANDARD TABLE OF gty_spool_data .
+  DATA:
+    gt_fi_spool_id TYPE STANDARD TABLE OF gty_fi_spool_id .
+  DATA:
+    gt_pdf_data TYPE STANDARD TABLE OF gty_pdf_table .
+  DATA:
+    gt_cmfp TYPE STANDARD TABLE OF gty_cmfp .
+  DATA:
+    gt_fi_invoices TYPE STANDARD TABLE OF zmmd_arinv_ack,
+    gt_sd_invoices TYPE STANDARD TABLE OF zmmd_arinv_ack.
+
+  CLASS-DATA go_instance TYPE REF TO zcl_invoice_attach_sap_to_bolt .
+  CONSTANTS gc_format_ind TYPE char4 VALUE '.pdf' ##NO_TEXT.
+  CONSTANTS gc_underscore TYPE char1 VALUE '_' ##NO_TEXT.
+  CONSTANTS gc_system TYPE char3 VALUE 'DBS' ##NO_TEXT.
+  CONSTANTS gc_unit TYPE t006-msehi VALUE 'MIN' ##NO_TEXT.
+  CONSTANTS gc_spool_req_type TYPE rspo0name VALUE 'INV' ##NO_TEXT.
+  CONSTANTS gc_app_id TYPE cm_aplid VALUE 'WFMC' ##NO_TEXT.
+  CONSTANTS gc_msg_nr TYPE msgnr VALUE '342' ##NO_TEXT.
+  CONSTANTS gc_ftp_parameter TYPE rvari_vnam VALUE 'CMI_SFTP_FGW_01' ##NO_TEXT.
+  CLASS-DATA gv_app_server_path TYPE dms_filepath .
+  CLASS-DATA gv_ftp_server_path TYPE dms_filepath .
+  CLASS-DATA go_ftp TYPE REF TO zcl_ca_ftp_helper_service .
+
+  METHODS send_sales_invoice_attachment
+    IMPORTING
+      !iv_spool_id        TYPE cmfp-msgv1
+      !iv_spool_timestamp TYPE rspocrtime .
+  METHODS send_fi_invoice_attachment
+    IMPORTING
+      !is_fi_inv_attach TYPE gty_fi_spool_id .
+  METHODS get_sales_inv_spool_requests
+    RETURNING
+      VALUE(rt_spool_id) TYPE ztfi_spool_id .
+  METHODS get_fi_invoice_spool_requests
+    RETURNING
+      VALUE(rt_fi_inv_spool) LIKE gt_fi_spool_id .
+  METHODS get_spool_id_content_sd_inv
+    IMPORTING
+      !iv_spool_id      TYPE cmfp-msgv1
+    EXPORTING
+      !et_spool_content TYPE soli_tab .
+  METHODS get_spool_id_data
+    IMPORTING
+      !it_spool_id   TYPE ztfi_spool_id
+    RETURNING
+      VALUE(rt_cmfp) LIKE gt_cmfp .
+  METHODS prepare_file_name
+    IMPORTING
+      !is_spool_data                TYPE gty_spool_data
+      !iv_spool_timestamp           TYPE rspocrtime
+    EXPORTING
+      VALUE(ev_app_server_filename) TYPE afilename
+    RETURNING
+      VALUE(rv_filename)            TYPE char255 .
+  METHODS convert_spool_content_into_otf
+    IMPORTING
+      !it_spool_content   TYPE soli_tab
+      !iv_spool_id        TYPE cmfp-msgv1
+      !iv_spool_timestamp TYPE rspocrtime .
+  METHODS convert_otf_to_pdf
+    IMPORTING
+      !it_otf        TYPE tt_itcoo
+    EXPORTING
+      !et_pdf_output TYPE tline_tab .
+  METHODS transfer_pdf_to_app_server
+    IMPORTING
+      !it_pdf_output  TYPE tline_tab OPTIONAL
+      !iv_filename    TYPE char255
+      !it_pdf_content LIKE gt_pdf_data OPTIONAL
+      !iv_is_sd_inv   TYPE boolean OPTIONAL
+      !iv_is_fi_inv   TYPE boolean OPTIONAL
+    EXPORTING
+      !ev_status      TYPE boolean .
+  METHODS transfer_pdf_to_ftp_server
+    IMPORTING
+      !iv_file_path      TYPE dms_filepath
+      !iv_filename       TYPE afilename
+      !iv_ftp_path       TYPE dms_filepath
+      !iv_fi_document_no TYPE belnr_d OPTIONAL
+      !iv_sd_document_no TYPE vbeln OPTIONAL .
+  METHODS get_fi_inv_spool_id_content
+    IMPORTING
+      !iv_spool_id          TYPE rspoid
+    RETURNING
+      VALUE(rt_pdf_content) LIKE gt_pdf_data .
+  METHODS prepare_transfer_fi_pdf_cont
+    IMPORTING
+      !it_pdf_content LIKE gt_pdf_data
+      !is_spool_data  TYPE gty_fi_spool_id .
+  METHODS get_invoice_no
+    IMPORTING
+      !iv_object_key       TYPE nast-objky
+    RETURNING
+      VALUE(rv_invoice_no) TYPE vbeln .
+  METHODS update_ftp_sent_status .
+ENDCLASS.
+
+
+
+CLASS ZCL_INVOICE_ATTACH_SAP_TO_BOLT IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->CONSTRUCTOR
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_APP_SERVER_PATH             TYPE        DMS_FILEPATH
+* | [--->] IV_FTP_SERVER_PATH             TYPE        DMS_FILEPATH
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD constructor.
+
+    CLEAR:gv_app_server_path,
+          gv_ftp_server_path,
+          go_ftp.
+
+    gv_app_server_path = iv_app_server_path.
+    gv_ftp_server_path = iv_ftp_server_path.
+
+*Get FTP server login credentials.
+    go_ftp = NEW zcl_ca_ftp_helper_service( gc_ftp_parameter ). "'CMI_SFTP_FGW_01'
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->CONVERT_OTF_TO_PDF
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_OTF                         TYPE        TT_ITCOO
+* | [<---] ET_PDF_OUTPUT                  TYPE        TLINE_TAB
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD convert_otf_to_pdf.
+
+    DATA:lv_bin_filesize TYPE xstring.
+
+    CLEAR et_pdf_output.
+
+    CALL FUNCTION 'CONVERT_OTF'
+      EXPORTING
+        format                = 'PDF'
+      IMPORTING
+        bin_filesize          = lv_bin_filesize
+      TABLES
+        otf                   = it_otf
+        lines                 = et_pdf_output
+      EXCEPTIONS
+        err_max_linewidth     = 1
+        err_format            = 2
+        err_conv_not_possible = 3
+        OTHERS                = 4.
+    IF sy-subrc <> 0.
+      IF lv_bin_filesize IS NOT INITIAL.
+        CLEAR lv_bin_filesize.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->CONVERT_SPOOL_CONTENT_INTO_OTF
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_SPOOL_CONTENT               TYPE        SOLI_TAB
+* | [--->] IV_SPOOL_ID                    TYPE        CMFP-MSGV1
+* | [--->] IV_SPOOL_TIMESTAMP             TYPE        RSPOCRTIME
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD convert_spool_content_into_otf.
+
+    DATA:lv_vbeln TYPE vbeln.
+
+    DATA:lt_otf TYPE STANDARD TABLE OF itcoo.
+
+    IF it_spool_content IS NOT INITIAL.
+
+*Check if spool is for single or multiple billing documents.
+      DATA(lt_spool_content) = it_spool_content.
+      DATA(lt_spool_data)    = gt_spool_data.
+
+      DELETE lt_spool_data WHERE msgv1 NE iv_spool_id.  "#EC CI_STDSEQ
+      DATA(lv_count) = lines( lt_spool_data ).
+
+*Spool for single billing document.
+      IF lv_count EQ '1'.
+
+*Convert OTF to PDF
+        lt_otf = lt_spool_content.
+        me->convert_otf_to_pdf( EXPORTING it_otf = lt_otf
+                                IMPORTING et_pdf_output = DATA(lt_pdf_output) ).
+
+*Prepare Filename and Transfer PDF output to AL11 directory.
+        DATA(ls_spool_data) = lt_spool_data[ 1 ].
+
+*Get File details.
+        me->prepare_file_name(
+          EXPORTING
+            is_spool_data          = ls_spool_data
+            iv_spool_timestamp     = iv_spool_timestamp
+          IMPORTING
+            ev_app_server_filename = DATA(lv_app_server_filename)
+          RECEIVING
+            rv_filename            = DATA(lv_filename) ).
+
+        me->transfer_pdf_to_app_server( EXPORTING iv_filename   = lv_filename
+                                                  iv_is_sd_inv  = abap_true
+                                                  it_pdf_output = lt_pdf_output
+                                        IMPORTING ev_status     = DATA(lv_status) ).
+
+*Transfer PDF file from application server to FTP server.
+        IF lv_status EQ abap_true.
+
+          CLEAR lv_vbeln.
+          lv_vbeln = me->get_invoice_no( EXPORTING iv_object_key = ls_spool_data-objky ).
+          me->transfer_pdf_to_ftp_server(
+            EXPORTING
+              iv_file_path      = gv_app_server_path
+              iv_filename       = lv_app_server_filename
+              iv_ftp_path       = gv_ftp_server_path
+              iv_sd_document_no = lv_vbeln ).
+
+          CLEAR lv_status.
+        ENDIF.
+
+        CLEAR:lv_filename,
+              lv_app_server_filename.
+
+*Spool for multiple billing documenta.
+      ELSEIF lv_count GT '1'.
+
+        SORT lt_spool_data BY objky.
+        LOOP AT lt_spool_data ASSIGNING FIELD-SYMBOL(<ls_spool_data>).
+          DATA(lt_spool_content_temp) = lt_spool_content.
+
+          DATA(lv_index) = line_index( lt_spool_content_temp[ line = '//' ] ).  "#EC CI_STDSEQ
+          DELETE lt_spool_content FROM '1' TO lv_index.
+          lv_index = lv_index + 1.
+          DELETE lt_spool_content_temp FROM lv_index.
+          CLEAR lv_index.
+          lt_otf = lt_spool_content_temp.
+
+*Convert OTF to PDF
+          me->convert_otf_to_pdf( EXPORTING it_otf = lt_otf
+                                  IMPORTING et_pdf_output = lt_pdf_output ).
+
+*Get File details.
+          me->prepare_file_name(
+            EXPORTING
+              is_spool_data          = <ls_spool_data>
+              iv_spool_timestamp     = iv_spool_timestamp
+            IMPORTING
+              ev_app_server_filename = lv_app_server_filename
+            RECEIVING
+              rv_filename            = lv_filename ).
+
+*Prepare Filename and Transfer PDF output to AL11 directory.
+          me->transfer_pdf_to_app_server( EXPORTING iv_filename   = lv_filename
+                                                    iv_is_sd_inv  = abap_true
+                                                    it_pdf_output = lt_pdf_output
+                                          IMPORTING ev_status     = lv_status ).
+
+*Transfer PDF file from application server to FTP server.
+          IF lv_status EQ abap_true.
+
+            CLEAR lv_vbeln.
+            lv_vbeln = me->get_invoice_no( EXPORTING iv_object_key = <ls_spool_data>-objky ).
+            me->transfer_pdf_to_ftp_server(
+              EXPORTING
+                iv_file_path      = gv_app_server_path
+                iv_filename       = lv_app_server_filename
+                iv_ftp_path       = gv_ftp_server_path
+                iv_sd_document_no = lv_vbeln ).
+            CLEAR lv_status.
+          ENDIF.
+
+          CLEAR:lt_otf,
+                lv_filename,
+                lt_pdf_output,
+                lt_spool_content_temp,
+                lv_app_server_filename.
+
+        ENDLOOP.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_FI_INVOICE_SPOOL_REQUESTS
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] RT_FI_INV_SPOOL                LIKE        GT_FI_SPOOL_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_fi_invoice_spool_requests.
+
+    DATA:lv_date         TYPE sy-datlo,
+         lv_time         TYPE sy-timlo,
+         lv_current_date LIKE sy-datlo,
+         lv_current_time LIKE sy-timlo.
+
+    DATA:lt_fi_inv_spool TYPE STANDARD TABLE OF gty_fi_spool_id.
+
+    CLEAR rt_fi_inv_spool.
+
+*Get current timestamp
+    CONVERT DATE sy-datlo TIME sy-timlo DAYLIGHT SAVING TIME abap_true
+    INTO TIME STAMP DATA(lv_current_ts) TIME ZONE sy-zonlo.
+
+    lv_current_date = sy-datlo.
+    lv_current_time = sy-timlo.
+
+*Get timestamp of 5min less than current time.
+    CALL FUNCTION 'START_TIME_DETERMINE'
+      EXPORTING
+        duration                   = '5'
+        unit                       = gc_unit      "'MIN'
+      IMPORTING
+        start_date                 = lv_date
+        start_time                 = lv_time
+      CHANGING
+        end_date                   = lv_current_date
+        end_time                   = lv_current_time
+      EXCEPTIONS
+        factory_calendar_not_found = 1
+        date_out_of_calendar_range = 2
+        date_not_valid             = 3
+        unit_conversion_error      = 4
+        si_unit_missing            = 5
+        parameters_not_valid       = 6
+        OTHERS                     = 7.
+    IF sy-subrc <> 0.
+      RETURN.
+    ELSE.
+
+      CONVERT DATE lv_date TIME lv_time DAYLIGHT SAVING TIME abap_true
+      INTO TIME STAMP DATA(lv_previous_ts) TIME ZONE sy-zonlo.
+
+*Get manually processed spool id's in last 5 min.
+      SELECT bukrs
+             belnr
+             timestamp
+             spoolid
+      FROM zfia_tax_invoice
+      INTO TABLE lt_fi_inv_spool
+      WHERE timestamp >= lv_previous_ts AND
+            timestamp <= lv_current_ts  AND
+            batch  EQ abap_false.
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_fi_inv_spool TO rt_fi_inv_spool.
+        CLEAR lt_fi_inv_spool.
+      ENDIF.
+
+*Get automatically processed spool id's in last 5 min.
+      SELECT a~bukrs
+             a~belnr
+             a~timestamp
+             a~spoolid
+      FROM zfia_tax_invoice AS a INNER JOIN zmmd_arinv_ack AS b ON a~belnr = b~belnr
+      INTO TABLE lt_fi_inv_spool
+      WHERE a~timestamp >= lv_previous_ts AND
+            a~timestamp <= lv_current_ts  AND
+            a~batch     = abap_true       AND
+            b~sapsent   = abap_true       AND
+            b~ftp_sent  = abap_false      AND
+            b~belnr     NE space.
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_fi_inv_spool TO rt_fi_inv_spool.
+        CLEAR lt_fi_inv_spool.
+      ENDIF.
+
+*Get remaining processed spool id's which were failed to send earlier due to some error.
+      SELECT b~bukrs
+             b~belnr
+             b~timestamp
+             b~spoolid
+      FROM zmmd_arinv_ack AS a INNER JOIN zfia_tax_invoice AS b ON a~belnr = b~belnr
+      INTO TABLE lt_fi_inv_spool
+      WHERE a~sapsent   = abap_true   AND
+            a~ftp_sent  = abap_false  AND
+            a~belnr     NE space      AND
+            b~timestamp <= lv_previous_ts.
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_fi_inv_spool TO rt_fi_inv_spool.
+        CLEAR lt_fi_inv_spool.
+      ENDIF.
+
+      SORT rt_fi_inv_spool BY belnr.
+      DELETE ADJACENT DUPLICATES FROM rt_fi_inv_spool COMPARING belnr.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_FI_INV_SPOOL_ID_CONTENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SPOOL_ID                    TYPE        RSPOID
+* | [<-()] RT_PDF_CONTENT                 LIKE        GT_PDF_DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_fi_inv_spool_id_content.
+
+    DATA: lv_offset TYPE i,
+          lv_len    TYPE i.
+
+    DATA:ls_pdf_data TYPE gty_pdf_table,
+         lt_pdf      TYPE fpcontent.
+
+    CLEAR rt_pdf_content.
+
+*Read the spool content
+    CALL FUNCTION 'FPCOMP_CREATE_PDF_FROM_SPOOL'
+      EXPORTING
+        i_spoolid      = iv_spool_id
+        i_partnum      = '1'
+      IMPORTING
+        e_pdf          = lt_pdf
+      EXCEPTIONS
+        ads_error      = 1
+        usage_error    = 2
+        system_error   = 3
+        internal_error = 4
+        OTHERS         = 5.
+    IF sy-subrc NE 0.
+      RETURN.
+    ELSE.
+
+* Modify the spool  contents to prepare internal table
+      lv_len = xstrlen( lt_pdf ).
+      WHILE lv_len >= 1000.
+        ls_pdf_data = lt_pdf+lv_offset(1000).
+        APPEND ls_pdf_data TO rt_pdf_content.
+        CLEAR ls_pdf_data.
+        ADD 1000 TO lv_offset.
+        SUBTRACT 1000 FROM lv_len.
+      ENDWHILE.
+
+      IF lv_len > 0.
+        ls_pdf_data = lt_pdf+lv_offset(lv_len).
+        APPEND ls_pdf_data TO rt_pdf_content.
+        CLEAR ls_pdf_data.
+        SUBTRACT lv_len FROM lv_len.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Static Public Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT=>GET_INSTANCE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_APP_SERVER_PATH             TYPE        DMS_FILEPATH
+* | [--->] IV_FTP_SERVER_PATH             TYPE        DMS_FILEPATH
+* | [<-()] RO_INSTANCE                    TYPE REF TO ZCL_INVOICE_ATTACH_SAP_TO_BOLT
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_instance.
+
+    IF go_instance IS INITIAL.
+      ro_instance =  NEW #( iv_app_server_path = iv_app_server_path
+                            iv_ftp_server_path = iv_ftp_server_path ).
+      go_instance = ro_instance.
+    ELSE.
+      ro_instance = go_instance.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_INVOICE_NO
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_OBJECT_KEY                  TYPE        NAST-OBJKY
+* | [<-()] RV_INVOICE_NO                  TYPE        VBELN
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_invoice_no.
+
+    DATA:lv_object_key TYPE string,
+         lv_invoice_no TYPE string.
+
+    CLEAR:lv_object_key,
+          lv_invoice_no,
+          rv_invoice_no.
+
+    lv_object_key = iv_object_key.
+    lv_invoice_no = lv_object_key+0(10).
+    rv_invoice_no = lv_invoice_no.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_SALES_INV_SPOOL_REQUESTS
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] RT_SPOOL_ID                    TYPE        ZTFI_SPOOL_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_sales_inv_spool_requests.
+
+    DATA:lv_date               TYPE sy-datlo,
+         lv_time               TYPE sy-timlo,
+         lv_current_date       LIKE sy-datlo,
+         lv_current_time       LIKE sy-timlo,
+         lv_current_timestamp  TYPE rspocrtime,
+         lv_previous_timestamp TYPE rspocrtime.
+
+    DATA:lt_spool_processed   TYPE ztfi_spool_id,
+         lt_spool_reprocessed TYPE ztfi_spool_id.
+
+    CLEAR rt_spool_id.
+
+*Get current timestamp
+    CONVERT DATE sy-datlo TIME sy-timlo DAYLIGHT SAVING TIME abap_true
+    INTO TIME STAMP DATA(lv_current_ts) TIME ZONE sy-zonlo.
+
+    lv_current_date = sy-datlo.
+    lv_current_time = sy-timlo.
+
+*Get timestamp of 5min less than current time.
+    CALL FUNCTION 'START_TIME_DETERMINE'
+      EXPORTING
+        duration                   = '5'
+        unit                       = gc_unit      "'MIN'
+      IMPORTING
+        start_date                 = lv_date
+        start_time                 = lv_time
+      CHANGING
+        end_date                   = lv_current_date
+        end_time                   = lv_current_time
+      EXCEPTIONS
+        factory_calendar_not_found = 1
+        date_out_of_calendar_range = 2
+        date_not_valid             = 3
+        unit_conversion_error      = 4
+        si_unit_missing            = 5
+        parameters_not_valid       = 6
+        OTHERS                     = 7.
+    IF sy-subrc <> 0.
+      RETURN.
+    ELSE.
+
+      CONVERT DATE lv_date TIME lv_time DAYLIGHT SAVING TIME abap_true
+      INTO TIME STAMP DATA(lv_previous_ts) TIME ZONE sy-zonlo.
+
+*Convert timestamp into char 16 format.
+      lv_current_timestamp = lv_current_ts.
+      CONDENSE lv_current_timestamp.
+      lv_current_timestamp = lv_current_timestamp && '00'.
+
+      lv_previous_timestamp = lv_previous_ts.
+      CONDENSE lv_previous_timestamp.
+      lv_previous_timestamp = lv_previous_timestamp && '00'.
+
+*Get processed spool id's.
+      SELECT rqident
+             rqcretime
+      FROM tsp01
+      INTO TABLE lt_spool_processed
+      WHERE rqclient  EQ sy-mandt              AND
+            rq0name   EQ gc_spool_req_type     AND  "'INV'
+            rqcretime >= lv_previous_timestamp AND
+            rqcretime <= lv_current_timestamp.          "#EC CI_NOFIELD
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_spool_processed TO rt_spool_id.
+      ENDIF.
+
+*Get reprocessed spool id's.
+      SELECT rqident
+             rqmodtime
+      FROM tsp01
+      INTO TABLE lt_spool_reprocessed
+      WHERE rqclient  EQ sy-mandt              AND
+            rq0name   EQ gc_spool_req_type     AND  "'INV'
+            rqmodtime >= lv_previous_timestamp AND
+            rqmodtime <= lv_current_timestamp.          "#EC CI_NOFIELD
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_spool_reprocessed TO rt_spool_id.
+      ENDIF.
+
+      SORT rt_spool_id BY rqident.
+      DELETE ADJACENT DUPLICATES FROM rt_spool_id COMPARING rqident.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_SPOOL_ID_CONTENT_SD_INV
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SPOOL_ID                    TYPE        CMFP-MSGV1
+* | [<---] ET_SPOOL_CONTENT               TYPE        SOLI_TAB
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_spool_id_content_sd_inv.
+
+    DATA:lv_spool_number TYPE tsp01-rqident.
+
+    CLEAR et_spool_content.
+
+    lv_spool_number = iv_spool_id.
+
+*Get content of Spool number.
+    CALL FUNCTION 'RSPO_RETURN_SPOOLJOB'
+      EXPORTING
+        rqident              = lv_spool_number
+      TABLES
+        buffer               = et_spool_content
+      EXCEPTIONS
+        no_such_job          = 1
+        job_contains_no_data = 2
+        selection_empty      = 3
+        no_permission        = 4
+        can_not_access       = 5
+        read_error           = 6
+        type_no_match        = 7
+        OTHERS               = 8.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->GET_SPOOL_ID_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_SPOOL_ID                    TYPE        ZTFI_SPOOL_ID
+* | [<-()] RT_CMFP                        LIKE        GT_CMFP
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_spool_id_data.
+
+    DATA:lv_var TYPE i.
+
+    DATA:lt_objky      TYPE STANDARD TABLE OF gty_objky,
+         lt_spool_data TYPE STANDARD TABLE OF gty_spool_data,
+         lt_rqident    TYPE STANDARD TABLE OF gty_rqident,
+         lt_tsp01      TYPE STANDARD TABLE OF gty_tsp01.
+
+    CLEAR:rt_cmfp,
+          gt_spool_data.
+
+*Get spool id related data.
+
+*Map INT4 type spool id into char format.
+    LOOP AT it_spool_id ASSIGNING FIELD-SYMBOL(<ls_spool_id>).
+      APPEND INITIAL LINE TO rt_cmfp ASSIGNING FIELD-SYMBOL(<ls_cmfp>).
+      IF <ls_cmfp> IS ASSIGNED.
+        <ls_cmfp>-msgv1     = <ls_spool_id>-rqident.
+        <ls_cmfp>-rqcretime = <ls_spool_id>-rqcretime.
+        CONDENSE <ls_cmfp>-msgv1.
+      ENDIF.
+    ENDLOOP.
+
+*Check required pre condition on processed spool id's.
+    SELECT DISTINCT vbeln                               "#EC CI_NOFIELD
+    FROM zmmd_arinv_ack
+    INTO TABLE @DATA(lt_vbeln)
+    WHERE vbeln    NE @space     AND
+          sapsent  = @abap_true  AND
+          ftp_sent = @abap_false.
+    IF sy-subrc EQ 0.
+      SORT lt_vbeln BY vbeln.
+      DATA(lt_documents) = lt_vbeln.
+      CLEAR lt_vbeln.
+    ENDIF.
+
+*Get required data on basis of spool id's.
+    IF rt_cmfp IS NOT INITIAL.
+
+      SELECT vbrk~bukrs
+             nast~objky
+             cmfp~msgv1
+      FROM cmfp AS cmfp INNER JOIN nast AS nast ON cmfp~nr    = nast~cmfpnr
+                        INNER JOIN vbrk AS vbrk ON vbrk~vbeln = nast~objky
+      INTO TABLE gt_spool_data
+      FOR ALL ENTRIES IN rt_cmfp
+      WHERE cmfp~msgv1 EQ rt_cmfp-msgv1 AND
+            cmfp~aplid EQ gc_app_id     AND "'WFMC'
+            cmfp~msgnr EQ gc_msg_nr.        "'342'
+      IF sy-subrc EQ 0.
+
+*Exclude documents which are already selected in last 5 min creteria.
+        DATA(lt_spool) = gt_spool_data.
+        CLEAR gt_spool_data.
+        LOOP AT lt_spool ASSIGNING FIELD-SYMBOL(<ls_spool_data>).
+          DATA(lv_index) = sy-tabix.
+
+          DATA(lv_invoice_no) = me->get_invoice_no( EXPORTING iv_object_key = <ls_spool_data>-objky ).
+          IF line_exists( lt_documents[ vbeln = lv_invoice_no ] ) ##WARN_OK.  "#EC CI_STDSEQ
+            DELETE lt_documents WHERE vbeln = lv_invoice_no.  "#EC CI_STDSEQ
+          ELSE.
+            DELETE lt_spool INDEX lv_index.
+            CLEAR lv_index.
+          ENDIF.
+
+          CLEAR lv_invoice_no.
+        ENDLOOP.
+
+*Exclude documents which are already selected in last 5 min creteria.
+        LOOP AT rt_cmfp ASSIGNING FIELD-SYMBOL(<ls_cmfp_data>).
+          IF line_exists( lt_spool[ msgv1 = <ls_cmfp_data>-msgv1 ] ). "#EC CI_STDSEQ
+            IF lv_var IS NOT INITIAL.
+              CLEAR lv_var.
+            ENDIF.
+          ELSE.
+            DELETE rt_cmfp WHERE msgv1 = <ls_cmfp_data>-msgv1.  "#EC CI_STDSEQ
+          ENDIF.
+        ENDLOOP.
+
+      ENDIF.
+
+    ENDIF.
+
+*Get already processed spool id'd which were not sent earlier due to some failure.
+    lt_vbeln      = lt_documents.
+    gt_spool_data = lt_spool.
+    CLEAR:lt_spool,
+          lt_documents.
+    IF lt_vbeln IS NOT INITIAL.
+
+      LOOP AT lt_vbeln ASSIGNING FIELD-SYMBOL(<ls_vbeln>).
+        APPEND INITIAL LINE TO lt_objky ASSIGNING FIELD-SYMBOL(<ls_objky>).
+        IF <ls_objky> IS ASSIGNED.
+          <ls_objky>-objky = <ls_vbeln>-vbeln.
+        ENDIF.
+      ENDLOOP.
+
+*Get required data of spool id's.
+      SELECT vbrk~bukrs
+             nast~objky
+             cmfp~msgv1
+      FROM nast AS nast INNER JOIN cmfp AS cmfp ON nast~cmfpnr = cmfp~nr
+                        INNER JOIN vbrk AS vbrk ON vbrk~vbeln = nast~objky
+      INTO TABLE lt_spool_data
+      FOR ALL ENTRIES IN lt_objky
+      WHERE nast~objky = lt_objky-objky AND
+            cmfp~aplid EQ gc_app_id     AND "'WFMC'
+            cmfp~msgnr EQ gc_msg_nr.        "'342'
+      IF sy-subrc EQ 0.
+        APPEND LINES OF lt_spool_data TO gt_spool_data.
+
+        LOOP AT lt_spool_data ASSIGNING FIELD-SYMBOL(<ls_spool>).
+          APPEND INITIAL LINE TO lt_rqident ASSIGNING FIELD-SYMBOL(<ls_rqident>).
+          IF <ls_rqident> IS ASSIGNED.
+            <ls_rqident>-rqident = <ls_spool>-msgv1.
+          ENDIF.
+        ENDLOOP.
+        CLEAR lt_spool_data.
+
+        SORT lt_rqident BY rqident.
+        DELETE ADJACENT DUPLICATES FROM lt_rqident COMPARING rqident.
+
+*Check if spool exists.
+        SELECT rqident
+               rqmodtime
+        FROM tsp01
+        INTO TABLE lt_tsp01
+        FOR ALL ENTRIES IN lt_rqident
+          WHERE rqident EQ lt_rqident-rqident AND
+                rq0name EQ 'INV'.
+        IF sy-subrc EQ 0.
+
+          LOOP AT lt_tsp01 ASSIGNING FIELD-SYMBOL(<ls_tsp01>).
+            APPEND INITIAL LINE TO rt_cmfp ASSIGNING <ls_cmfp>.
+            IF <ls_cmfp> IS ASSIGNED.
+              <ls_cmfp>-msgv1     = <ls_tsp01>-rqident.
+              <ls_cmfp>-rqcretime = <ls_tsp01>-rqmodtime.
+              CONDENSE <ls_cmfp>-msgv1.
+            ENDIF.
+          ENDLOOP.
+
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->PREPARE_FILE_NAME
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IS_SPOOL_DATA                  TYPE        GTY_SPOOL_DATA
+* | [--->] IV_SPOOL_TIMESTAMP             TYPE        RSPOCRTIME
+* | [<---] EV_APP_SERVER_FILENAME         TYPE        AFILENAME
+* | [<-()] RV_FILENAME                    TYPE        CHAR255
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_file_name.
+
+    CLEAR:ev_app_server_filename,
+          rv_filename.
+
+    rv_filename = gv_app_server_path  &&
+                  gc_system           &&
+                  gc_underscore       &&
+                  is_spool_data-bukrs &&
+                  gc_underscore       &&
+                  is_spool_data-objky &&
+                  gc_underscore       &&
+                  iv_spool_timestamp  &&
+                  gc_format_ind.
+
+    CONDENSE rv_filename.
+
+    ev_app_server_filename = gc_system           &&
+                             gc_underscore       &&
+                             is_spool_data-bukrs &&
+                             gc_underscore       &&
+                             is_spool_data-objky &&
+                             gc_underscore       &&
+                             iv_spool_timestamp  &&
+                             gc_format_ind.
+
+    CONDENSE ev_app_server_filename.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->PREPARE_TRANSFER_FI_PDF_CONT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_PDF_CONTENT                 LIKE        GT_PDF_DATA
+* | [--->] IS_SPOOL_DATA                  TYPE        GTY_FI_SPOOL_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD prepare_transfer_fi_pdf_cont.
+
+    DATA:ls_spool_data TYPE gty_spool_data,
+         lv_timestamp  TYPE rspocrtime.
+
+    ls_spool_data-bukrs = is_spool_data-bukrs.
+    ls_spool_data-objky = is_spool_data-belnr.
+    lv_timestamp        = is_spool_data-timestamp.
+
+    CONDENSE lv_timestamp.
+
+*Get File details.
+    me->prepare_file_name(
+      EXPORTING
+        is_spool_data          = ls_spool_data
+        iv_spool_timestamp     = lv_timestamp
+      IMPORTING
+        ev_app_server_filename = DATA(lv_app_server_filename)
+      RECEIVING
+        rv_filename            = DATA(lv_filename) ).
+
+    me->transfer_pdf_to_app_server( EXPORTING iv_filename    = lv_filename
+                                              iv_is_fi_inv   = abap_true
+                                              it_pdf_content = it_pdf_content
+                                    IMPORTING ev_status      = DATA(lv_status) ).
+
+*Transfer PDF file from application server to FTP server.
+    IF lv_status EQ abap_true.
+      me->transfer_pdf_to_ftp_server(
+        EXPORTING
+          iv_file_path      = gv_app_server_path
+          iv_filename       = lv_app_server_filename
+          iv_ftp_path       = gv_ftp_server_path
+          iv_fi_document_no = is_spool_data-belnr ).
+      CLEAR lv_status.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->SEND_FI_INVOICE_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IS_FI_INV_ATTACH               TYPE        GTY_FI_SPOOL_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_fi_invoice_attachment.
+
+*Step 1: Prepare and transfer FI invoices
+    me->prepare_transfer_fi_pdf_cont( EXPORTING is_spool_data  = is_fi_inv_attach
+                                                it_pdf_content = me->get_fi_inv_spool_id_content( EXPORTING iv_spool_id = is_fi_inv_attach-spoolid ) ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->SEND_INVOICE_ATTACHMENTS
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_invoice_attachments.
+
+    CLEAR:gt_fi_invoices,
+          gt_sd_invoices.
+
+*Get spool id of Sales Invoices and relevant data.
+    LOOP AT me->get_spool_id_data( EXPORTING it_spool_id = me->get_sales_inv_spool_requests( ) ) ASSIGNING FIELD-SYMBOL(<ls_spool_id>).
+
+      me->send_sales_invoice_attachment( EXPORTING iv_spool_id        = <ls_spool_id>-msgv1
+                                                   iv_spool_timestamp = <ls_spool_id>-rqcretime ).
+
+    ENDLOOP.
+
+*Get spool id of FI Invoices and relevant data.
+    LOOP AT me->get_fi_invoice_spool_requests( ) ASSIGNING FIELD-SYMBOL(<ls_fi_inv_spool_req>).
+
+      me->send_fi_invoice_attachment( EXPORTING is_fi_inv_attach = <ls_fi_inv_spool_req> ).
+
+    ENDLOOP.
+
+*Update FTP sent status.
+    me->update_ftp_sent_status( ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->SEND_SALES_INVOICE_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SPOOL_ID                    TYPE        CMFP-MSGV1
+* | [--->] IV_SPOOL_TIMESTAMP             TYPE        RSPOCRTIME
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD send_sales_invoice_attachment.
+
+*Step 1: Get content of spool id.
+    me->get_spool_id_content_sd_inv( EXPORTING iv_spool_id      = iv_spool_id
+                                     IMPORTING et_spool_content = DATA(lt_spool_content) ).
+
+*Step 2: Convert spool content into OTF.
+    me->convert_spool_content_into_otf( EXPORTING iv_spool_id        = iv_spool_id
+                                                  iv_spool_timestamp = iv_spool_timestamp
+                                                  it_spool_content   = lt_spool_content ).
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->TRANSFER_PDF_TO_APP_SERVER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_PDF_OUTPUT                  TYPE        TLINE_TAB(optional)
+* | [--->] IV_FILENAME                    TYPE        CHAR255
+* | [--->] IT_PDF_CONTENT                 LIKE        GT_PDF_DATA(optional)
+* | [--->] IV_IS_SD_INV                   TYPE        BOOLEAN(optional)
+* | [--->] IV_IS_FI_INV                   TYPE        BOOLEAN(optional)
+* | [<---] EV_STATUS                      TYPE        BOOLEAN
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD transfer_pdf_to_app_server.
+
+    CLEAR ev_status.
+
+*Transfer SD Invoice to application server.
+    IF iv_is_sd_inv EQ abap_true.
+
+      IF iv_filename IS NOT INITIAL AND
+         it_pdf_output IS NOT INITIAL.
+
+        OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE.
+        IF  sy-subrc = 0 .
+          LOOP AT it_pdf_output ASSIGNING FIELD-SYMBOL(<ls_pdf_output>).
+            TRANSFER <ls_pdf_output> TO iv_filename.
+          ENDLOOP.
+          CLOSE DATASET iv_filename.
+          ev_status = abap_true.
+        ENDIF.
+
+      ENDIF.
+
+*Transfer FI Invoice to application server.
+    ELSEIF iv_is_fi_inv EQ abap_true.
+
+      IF iv_filename IS NOT INITIAL AND
+         it_pdf_content IS NOT INITIAL.
+
+        OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE.
+        IF  sy-subrc = 0 .
+          LOOP AT it_pdf_content ASSIGNING FIELD-SYMBOL(<ls_pdf_content>).
+            TRANSFER <ls_pdf_content> TO iv_filename.
+          ENDLOOP.
+          CLOSE DATASET iv_filename.
+          ev_status = abap_true.
+        ENDIF.
+
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->TRANSFER_PDF_TO_FTP_SERVER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_FILE_PATH                   TYPE        DMS_FILEPATH
+* | [--->] IV_FILENAME                    TYPE        AFILENAME
+* | [--->] IV_FTP_PATH                    TYPE        DMS_FILEPATH
+* | [--->] IV_FI_DOCUMENT_NO              TYPE        BELNR_D(optional)
+* | [--->] IV_SD_DOCUMENT_NO              TYPE        VBELN(optional)
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD transfer_pdf_to_ftp_server.
+
+    TRY.
+        IF go_ftp IS BOUND.
+          go_ftp->move_files_as_to_sftp(
+            EXPORTING
+              iv_file_path = iv_file_path   "'/DEV/to_bolt/dev/ARinvoice/in'
+              iv_filename  = iv_filename
+              iv_ftp_path  = iv_ftp_path ). "'/to_bolt/dev/ARinvoice/'
+
+*Update FTP_SENT flag for FI invoices.
+          IF iv_fi_document_no IS NOT INITIAL.
+
+            APPEND INITIAL LINE TO gt_fi_invoices ASSIGNING FIELD-SYMBOL(<ls_fi_invoices>).
+            IF <ls_fi_invoices> IS ASSIGNED.
+              <ls_fi_invoices>-belnr = iv_fi_document_no.
+            ENDIF.
+
+*Update FTP_SENT flag for SD invoices.
+          ELSEIF iv_sd_document_no IS NOT INITIAL.
+
+            APPEND INITIAL LINE TO gt_sd_invoices ASSIGNING FIELD-SYMBOL(<ls_sd_invoices>).
+            IF <ls_sd_invoices> IS ASSIGNED.
+              <ls_sd_invoices>-vbeln = iv_sd_document_no.
+            ENDIF.
+
+          ENDIF.
+        ENDIF.
+      CATCH zcx_ca_ftp_fault.
+        RETURN.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZCL_INVOICE_ATTACH_SAP_TO_BOLT->UPDATE_FTP_SENT_STATUS
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD update_ftp_sent_status.
+
+    DATA:lv_var TYPE i.
+
+    IF gt_fi_invoices IS NOT INITIAL.
+
+*Get FI invoice details.
+      SELECT *
+      FROM zmmd_arinv_ack
+      INTO TABLE @DATA(lt_arinv)
+      FOR ALL ENTRIES IN @gt_fi_invoices
+      WHERE belnr EQ @gt_fi_invoices-belnr.
+      IF sy-subrc EQ 0.
+
+        LOOP AT lt_arinv ASSIGNING FIELD-SYMBOL(<ls_arinv>).
+          <ls_arinv>-ftp_sent = abap_true.
+        ENDLOOP.
+
+*Update FTP sent status for FI invoices.
+        IF lt_arinv IS NOT INITIAL.
+          UPDATE zmmd_arinv_ack FROM TABLE lt_arinv.
+          IF sy-subrc EQ 0.
+            IF lv_var IS NOT INITIAL.
+              CLEAR lv_var.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+      ENDIF.
+
+    ENDIF.
+
+    IF gt_sd_invoices IS NOT INITIAL.
+
+*Get SD invoice details.
+      SELECT *
+      FROM zmmd_arinv_ack
+      INTO TABLE @DATA(lt_sdinv)
+      FOR ALL ENTRIES IN @gt_sd_invoices
+      WHERE vbeln EQ @gt_sd_invoices-vbeln.
+      IF sy-subrc EQ 0.
+
+        LOOP AT lt_sdinv ASSIGNING FIELD-SYMBOL(<ls_sdinv>).
+          <ls_sdinv>-ftp_sent = abap_true.
+        ENDLOOP.
+
+*Update FTP sent status for SD invoices.
+        IF lt_sdinv IS NOT INITIAL.
+          UPDATE zmmd_arinv_ack FROM TABLE lt_sdinv.
+          IF sy-subrc EQ 0.
+            IF lv_var IS NOT INITIAL.
+              CLEAR lv_var.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.
