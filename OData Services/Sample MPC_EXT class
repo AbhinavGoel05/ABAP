@@ -1,0 +1,61 @@
+CLASS zcl_zodata_jor_estimat_mpc_ext DEFINITION
+  PUBLIC
+  INHERITING FROM zcl_zodata_jor_estimat_mpc
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+
+    TYPES:
+      BEGIN OF ty_deep_entity,
+        projectid                 TYPE zrpm_extid,
+        materialcategory          TYPE zcharact,
+        nav_headertobomcomponents TYPE STANDARD TABLE OF zcl_zodata_jor_estimat_mpc=>ts_bomcomponents WITH DEFAULT KEY,
+      END OF ty_deep_entity .
+
+    METHODS define
+        REDEFINITION .
+protected section.
+private section.
+ENDCLASS.
+
+
+
+CLASS ZCL_ZODATA_JOR_ESTIMAT_MPC_EXT IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMAT_MPC_EXT->DEFINE
+* +-------------------------------------------------------------------------------------------------+
+* | [!CX!] /IWBEP/CX_MGW_MED_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD define.
+
+    DATA:lo_entity   TYPE REF TO /iwbep/if_mgw_odata_entity_typ,
+         lo_entity1  TYPE REF TO /iwbep/if_mgw_odata_entity_typ,
+         lo_property TYPE REF TO /iwbep/if_mgw_odata_property.
+
+    super->define( ).
+
+*Set entity as media entity
+    lo_entity = model->get_entity_type( iv_entity_name = 'Attachment' ) ##NO_TEXT.
+
+    IF lo_entity IS BOUND.
+      lo_property = lo_entity->get_property( iv_property_name = 'ProjectId').
+      lo_property = lo_entity->get_property( iv_property_name = 'MaterialCategory').
+      lo_property = lo_entity->get_property( iv_property_name = 'Material') ##NO_TEXT.
+      lo_property = lo_entity->get_property( iv_property_name = 'ComponentId').
+      lo_property = lo_entity->get_property( iv_property_name = 'MimeType').
+      lo_property->set_as_content_type( ).
+    ENDIF.
+
+*Set Deep entity
+    lo_entity1 = model->get_entity_type( iv_entity_name = 'Header' ) ##NO_TEXT.
+    IF lo_entity1 IS BOUND.
+      lo_entity1->bind_structure(
+        EXPORTING
+          iv_structure_name   = 'ZCL_ZPROJECT_MPC_EXT=>TY_DEEP_ENTITY'
+      ).
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.
