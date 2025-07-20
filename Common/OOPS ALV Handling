@@ -1,0 +1,1815 @@
+REPORT zuogsr_terminal_cockpit.
+
+*DATA Declaration.
+INCLUDE zuogsr_terminal_cockpit_top.
+
+*Event Handling
+INCLUDE zuogsr_terminal_event_handle.
+
+*SELECTION-SCREEN.
+INCLUDE zuogsr_terminal_cockpit_sel.
+
+*PERFORM
+INCLUDE zuogsr_terminal_cockpit_sub.
+
+*START-OF-SELECTION.
+START-OF-SELECTION.
+
+*Get ALV data.
+  PERFORM get_data.
+
+  CALL SCREEN 101.
+--------------------------------------------------------------------------------------------------------
+Code of INCLUDE zuogsr_terminal_cockpit_top.
+
+*&---------------------------------------------------------------------*
+*& Include          ZUOGSR_TERMINAL_COCKPIT_TOP
+*&---------------------------------------------------------------------*
+
+TYPES:BEGIN OF ty_itemalvdata,
+        vbeln TYPE vbeln.
+        INCLUDE TYPE zogs_str_te_item.
+TYPES:END OF ty_itemalvdata.
+
+TYPES:BEGIN OF ty_subitemalv,
+        condition_type TYPE kscha.
+        INCLUDE TYPE zogs_str_te_subitem.
+TYPES:END OF ty_subitemalv.
+
+TYPES:BEGIN OF ty_fields,
+        field TYPE lvc_fname,
+      END OF ty_fields.
+
+TYPES:BEGIN OF ty_service_conf_no,
+        row_id          TYPE lvc_s_roid-row_id,
+        service_conf_no TYPE i,
+      END OF ty_service_conf_no.
+
+DATA:
+  gv_werks              TYPE werks_d,
+  gv_kunnr              TYPE kna1-kunnr,
+  gv_werks_description  TYPE t001w-name1,
+  gv_kunnr_description  TYPE kna1-name1,
+  gv_sel_condition_type TYPE kschl,
+  gv_charge_type        TYPE zogs_chrgtype,
+  gv_report_title       TYPE char20,
+  gv_vbeln              TYPE vbeln.
+
+DATA:
+  go_itemcont    TYPE REF TO cl_gui_custom_container,
+  go_itemalv     TYPE REF TO cl_gui_alv_grid,
+  go_subitemcont TYPE REF TO cl_gui_custom_container,
+  go_subitemalv  TYPE REF TO cl_gui_alv_grid.
+
+DATA:
+  gt_itemalvdata       TYPE STANDARD TABLE OF ty_itemalvdata,
+  gt_subitemalvdata    TYPE STANDARD TABLE OF zogs_str_te_subitem,
+  gt_subitemdata       TYPE STANDARD TABLE OF ty_subitemalv,
+  gt_store_subitemdata TYPE STANDARD TABLE OF ty_subitemalv,
+  gt_subitemalv_prop   TYPE STANDARD TABLE OF ztogs_te_con_prt,
+  gt_search_fieldname  TYPE STANDARD TABLE OF ty_fields,
+  gt_service_conf_no   TYPE STANDARD TABLE OF ty_service_conf_no.
+----------------------------------------------------------------------------------------------------------------
+Code of INCLUDE zuogsr_terminal_event_handle.
+*&---------------------------------------------------------------------*
+*& Include          ZUOGSR_TERMINAL_EVENT_HANDLE
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+* CLASS lcl_event_receiver DEFINITION
+*----------------------------------------------------------------------*
+CLASS lcl_event_class DEFINITION FINAL.
+
+  PUBLIC SECTION.
+
+    METHODS:
+
+*Handling double click
+  handle_double_click
+  FOR EVENT double_click OF cl_gui_alv_grid IMPORTING e_row,
+
+*Handling Search help.
+   handle_on_f4
+   FOR EVENT onf4 OF cl_gui_alv_grid IMPORTING e_fieldname
+   es_row_no er_event_data,
+
+*Handling changed data.
+    handle_data_changed
+    FOR EVENT data_changed OF cl_gui_alv_grid IMPORTING er_data_changed.
+
+ENDCLASS. "lcl_event_receiver DEFINITION
+
+DATA:go_event_handle TYPE REF TO lcl_event_class.
+
+*----------------------------------------------------------------------*
+* CLASS lcl_event_receiver IMPLEMENTATION
+*----------------------------------------------------------------------*
+CLASS lcl_event_class IMPLEMENTATION.
+
+  METHOD handle_double_click.
+
+    DATA:
+      lt_fieldcatalog    TYPE lvc_t_fcat,
+      ls_layout          TYPE lvc_s_layo,
+      lt_exclude_buttons TYPE ui_functions.
+
+    DATA(ls_selected_row) = gt_itemalvdata[ e_row ].
+
+*Storesubitemalvdata temporarily to save in databse.
+    PERFORM store_subitemalv_data.
+
+    CLEAR   gv_sel_condition_type .
+    gv_sel_condition_type  = ls_selected_row-sub_condition_type.
+
+*Get search enabled field in subitemalv.
+    CLEAR gt_search_fieldname.
+    PERFORM get_search_enabled_field USING gv_sel_condition_type
+                                                          CHANGING gt_search_fieldname.
+
+*Free sibitemalv objects.
+    PERFORM free_subitemalv_objects.
+
+*Creating object of container
+    CREATE OBJECT go_subitemcont
+      EXPORTING
+        container_name = 'SUBITEMCONT'.
+    IF go_subitemcont IS NOT INITIAL.
+
+*Creating object of alv
+      CREATE OBJECT go_subitemalv
+        EXPORTING
+          i_parent = go_subitemcont.
+      IF go_subitemalv IS NOT INITIAL.
+
+*Disable subitemalv toolbar buttons.
+        PERFORM exclude_subitemalv_buttons CHANGING lt_exclude_buttons.
+
+*Handle F4help in subitemalv.
+        SET HANDLER go_event_handle->handle_on_f4 FOR go_subitemalv.
+
+*Handle changed data in subitemalv.
+        SET HANDLER go_event_handle->handle_data_changed FOR go_subitemalv.
+
+*Create subitemalv field catalogue
+        PERFORM subitemalv_fieldcatalog USING ls_selected_row
+                                                            CHANGING lt_fieldcatalog.
+
+*Get data of subitemalv.
+        CLEAR gt_subitemalvdata.
+        PERFORM subitemalv_data USING ls_selected_row
+                                                 CHANGING gt_subitemalvdata.
+
+*Create Alv layout
+        PERFORM subitemalv_layout CHANGING ls_layout.
+
+* Registering edit
+        PERFORM register_edit.
+
+*Register fields for search help.
+        PERFORM register_for_searchhelp USING ls_selected_row.
+
+*Display ALV.
+        CALL METHOD go_subitemalv->set_table_for_first_display
+          EXPORTING
+            is_layout            = ls_layout
+            it_toolbar_excluding = lt_exclude_buttons
+            i_save               = 'A'
+          CHANGING
+            it_outtab            = gt_subitemalvdata
+            it_fieldcatalog      = lt_fieldcatalog.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        ENDIF.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD handle_on_f4.
+
+    PERFORM get_data_on_searchhelp USING e_fieldname es_row_no er_event_data.
+
+  ENDMETHOD.
+
+  METHOD handle_data_changed.
+
+    DATA:
+      lv_total_quantity TYPE menge_d,
+      lv_f4help_fm      TYPE zogs_f4help_fm,
+      lv_field_changed  TYPE lvc_fname.
+
+    DATA:
+      ls_f4help_data    TYPE zogs_str_te_subitem,
+      ls_f4help_import  TYPE zogs_str_f4help_import,
+      lt_default_fields TYPE lvc_t_tabl.
+
+    FIELD-SYMBOLS:
+      <lfs_field> TYPE any,
+      <lfs_value> TYPE any.
+
+    IF er_data_changed->mt_inserted_rows IS INITIAL AND
+         er_data_changed->mt_good_cells  IS NOT INITIAL.
+
+*Get derived subitemalv data.
+      DATA(ls_field_changed) = er_data_changed->mt_good_cells[ 1 ].
+      IF ls_field_changed IS NOT INITIAL.
+        IF line_exists( gt_search_fieldname[ field = ls_field_changed-fieldname ] ).
+
+*Get F4help FM to derive subitemalv data.
+          CLEAR lv_field_changed.
+          lv_field_changed = ls_field_changed-fieldname.
+          PERFORM get_derive_subitemalv_qty_fm  USING lv_field_changed
+                                                                          CHANGING lv_f4help_fm.
+          IF  lv_f4help_fm IS NOT INITIAL.
+
+            CLEAR:ls_f4help_import,ls_f4help_data,lt_default_fields.
+            ASSIGN COMPONENT ls_field_changed-fieldname OF STRUCTURE ls_f4help_import TO <lfs_field>.
+            IF <lfs_field> IS ASSIGNED.
+              MOVE ls_field_changed-value TO <lfs_field>.
+            ENDIF.
+
+            CALL FUNCTION lv_f4help_fm
+              EXPORTING
+                i_s_f4help_import  = ls_f4help_import
+                i_f4help_fieldname = ls_field_changed-fieldname
+                i_derive_data_ind  = 'M'
+              IMPORTING
+                e_s_f4help_data    = ls_f4help_data
+                e_t_default_fields = lt_default_fields.
+            IF ls_f4help_data IS NOT INITIAL.
+
+              READ TABLE gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemdata>) INDEX ls_field_changed-row_id.
+              IF <lfs_subitemdata> IS ASSIGNED.
+
+                LOOP AT lt_default_fields ASSIGNING FIELD-SYMBOL(<lfs_default_fields>).
+                  ASSIGN COMPONENT <lfs_default_fields>-value OF STRUCTURE <lfs_subitemdata> TO <lfs_field>.
+                  IF <lfs_field> IS ASSIGNED.
+                    ASSIGN COMPONENT <lfs_default_fields>-value OF STRUCTURE ls_f4help_data TO <lfs_value>.
+                    IF <lfs_value> IS ASSIGNED.
+                      MOVE <lfs_value> TO <lfs_field>.
+                    ENDIF.
+                  ENDIF.
+                ENDLOOP.
+
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+*Update total base quantity in itemalv on basis of derived quantity
+          CLEAR lv_total_quantity.
+          LOOP AT gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>).
+            lv_total_quantity = lv_total_quantity + <lfs_subitemalvdata>-quantity.
+          ENDLOOP.
+
+*Update calculated total base quantity in itemalv.
+          PERFORM upd_cal_base_qty_in_itemalv USING lv_total_quantity.
+
+*Refresh Subitemalv.
+          PERFORM refresh_subitemalv.
+
+        ENDIF.
+      ENDIF.
+
+*Update total base quantity in itemalv on changing the quantity from subitemalv.
+      PERFORM upd_itemqty_on_subitem_qty_chg USING er_data_changed.
+
+    ENDIF.
+
+*Update itemalvdata on record deletion from subitemalv.
+    PERFORM upd_itemalv_qty_on_subitem_del USING er_data_changed.
+
+  ENDMETHOD.
+
+ENDCLASS.
+-------------------------------------------------------------------------------------------------------------------
+Code of INCLUDE zuogsr_terminal_cockpit_sel.
+*&---------------------------------------------------------------------*
+*& Include ZUOGSR_TERMINAL_COCKPIT_SEL
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+
+  PARAMETERS:
+    lv_comp  TYPE bkpf-bukrs OBLIGATORY,
+    lv_werks TYPE ekpo-werks OBLIGATORY,
+    lv_cust    TYPE kna1-kunnr OBLIGATORY,
+    lv_cnf_m TYPE ztogs_te_header-conf_period OBLIGATORY.
+
+SELECTION-SCREEN END OF BLOCK b1.
+--------------------------------------------------------------------------------------------------------------------------
+Code of INCLUDE zuogsr_terminal_cockpit_sub.
+*&---------------------------------------------------------------------*
+*& Include          ZUOGSR_TERMINAL_COCKPIT_SUB
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& Form get_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM get_data.
+
+*Get the first and last date of month.
+  DATA:
+    lv_first_day      TYPE sy-datum,
+    lv_last_day       TYPE sy-datum,
+    lv_msg(50)        TYPE c,
+    lv_msgtype(1)     TYPE c,
+    lv_total_quantity TYPE menge_d,
+    lv_condition_type TYPE kschl.
+
+  DATA:
+    ls_import_qty_cal  TYPE zogs_str_import_qty_cal,
+    lt_subitemalv_data TYPE zogsa_tt_str_te_subitem.
+
+*Read configurations from ZGBL_PARAM table.
+  PERFORM read_configurations.
+
+*Perform set header values in output screen.
+  PERFORM set_values_in_output.
+
+*Get first and last day of month.
+  PERFORM get_month_start_end_day USING lv_cnf_m
+                                                          CHANGING lv_first_day
+                                                                            lv_last_day.
+
+  IF lv_first_day IS NOT INITIAL AND
+      lv_last_day IS NOT INITIAL.
+
+    SELECT a~vbeln,
+                a~knumv,
+                b~posnr,
+                b~matnr,
+                b~meins,
+                b~werks,
+                c~kschl,
+                c~kbetr,
+                c~waers,
+                e~vtext
+    INTO TABLE @DATA(lt_data)
+    FROM vbak AS a INNER JOIN vbap AS b  ON  a~vbeln = b~vbeln
+                              INNER JOIN prcd_elements AS c ON c~knumv = a~knumv AND
+                                                                                      c~kposn = b~posnr
+                              INNER JOIN zogs_ts_contype AS d ON c~kschl = d~kschl
+                              LEFT OUTER JOIN t685t AS e ON c~kschl = e~kschl BYPASSING BUFFER
+    WHERE a~bukrs_vf  EQ  @lv_comp AND
+                a~kunnr       EQ  @lv_cust  AND
+              ( a~guebg >= @lv_first_day OR a~guebg <= @lv_last_day ) AND
+              ( a~gueen <= @lv_last_day OR a~gueen >= @lv_first_day ) AND
+                a~auart        EQ 'ZSER' AND
+                b~werks       EQ  @lv_werks AND
+                d~chrg_type EQ @gv_charge_type AND
+                e~spras        EQ @sy-langu.
+    IF sy-subrc EQ 0.
+
+      SORT lt_data BY vbeln.
+      DATA(lv_contract) = lt_data[ 1 ]-vbeln.
+      DELETE lt_data WHERE vbeln NE lv_contract.
+
+      CLEAR gv_vbeln .
+      gv_vbeln = lv_contract.
+
+      LOOP AT lt_data ASSIGNING FIELD-SYMBOL(<lfs_data>).
+
+        CLEAR lv_condition_type.
+        lv_condition_type = <lfs_data>-kschl.
+
+*-------------------------------------------------------------------------
+*Map data into Item ALV.
+*-------------------------------------------------------------------------
+        IF line_exists( gt_itemalvdata[ sub_condition_type = <lfs_data>-kschl ] ).
+
+        ELSE.
+          APPEND INITIAL LINE TO gt_itemalvdata ASSIGNING FIELD-SYMBOL(<lfs_itemdata>).
+          IF <lfs_itemdata> IS ASSIGNED.
+            <lfs_itemdata>-sub_condition_type = <lfs_data>-kschl.
+            <lfs_itemdata>-description = <lfs_data>-vtext.
+            <lfs_itemdata>-calculation_basis = TEXT-003.
+            <lfs_itemdata>-unit = <lfs_data>-meins.
+            <lfs_itemdata>-rate = <lfs_data>-kbetr.
+            <lfs_itemdata>-currency = <lfs_data>-waers.
+            <lfs_itemdata>-vbeln = <lfs_data>-vbeln.
+            <lfs_itemdata>-posnr = <lfs_data>-posnr.
+          ENDIF.
+        ENDIF.
+
+*-------------------------------------------------------------------------
+*Get and map data to subitem alv.
+*-------------------------------------------------------------------------
+        CLEAR ls_import_qty_cal.
+        ls_import_qty_cal-werks = <lfs_data>-werks.
+        ls_import_qty_cal-from_date = lv_first_day.
+        ls_import_qty_cal-to_date = lv_last_day.
+        ls_import_qty_cal-matnr = <lfs_data>-matnr.
+
+        PERFORM get_subitemalv_data USING lv_condition_type
+                                                                   ls_import_qty_cal
+                                                        CHANGING lv_msg
+                                                                          lv_msgtype
+                                                                          lt_subitemalv_data.
+        IF lv_msg IS INITIAL.
+
+          CLEAR lv_total_quantity.
+          LOOP AT lt_subitemalv_data ASSIGNING FIELD-SYMBOL(<lfs_subitemalv_data>).
+
+            APPEND INITIAL LINE TO gt_subitemdata ASSIGNING FIELD-SYMBOL(<lfs_subitemdata>).
+            IF <lfs_subitemdata> IS ASSIGNED.
+              <lfs_subitemdata>-condition_type = <lfs_data>-kschl.
+              <lfs_subitemdata>-mblnr = <lfs_subitemalv_data>-mblnr.
+              <lfs_subitemdata>-mjahr = <lfs_subitemalv_data>-mjahr.
+              <lfs_subitemdata>-budat = <lfs_subitemalv_data>-budat.
+              <lfs_subitemdata>-quantity = <lfs_subitemalv_data>-quantity.
+              <lfs_subitemdata>-unit = <lfs_subitemalv_data>-unit.
+              <lfs_subitemdata>-system_no = <lfs_subitemalv_data>-system_no.
+              <lfs_subitemdata>-matnr = <lfs_subitemalv_data>-matnr.
+
+              lv_total_quantity = lv_total_quantity + <lfs_subitemalv_data>-quantity.
+            ENDIF.
+
+          ENDLOOP.
+
+*   Update total base quantity condition type wise.
+          PERFORM update_total_base_quantity USING lv_total_quantity
+                                                                               lv_condition_type.
+
+        ENDIF.
+      ENDLOOP.
+
+*-------------------------------------------------------------------------
+*Get subitemalv properties.
+*-------------------------------------------------------------------------
+      PERFORM get_subitemalv_properties.
+
+    ELSE.
+      MESSAGE s002(zongs_msg) DISPLAY LIKE 'E'.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Module STATUS_0101 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0101 OUTPUT.
+
+  SET PF-STATUS 'ZPF_TERMINAL'.
+  SET TITLEBAR gv_report_title.
+
+  DATA:
+    gt_fieldcatalog TYPE lvc_t_fcat,
+    gs_layout       TYPE lvc_s_layo.
+
+  IF go_itemcont IS INITIAL.
+
+*Creating object of container
+    CREATE OBJECT go_itemcont
+      EXPORTING
+        container_name = 'ITEMCONT'.
+
+    IF go_itemcont IS NOT INITIAL.
+
+*Creating object of alv
+      CREATE OBJECT go_itemalv
+        EXPORTING
+          i_parent = go_itemcont.
+
+      IF go_itemalv IS NOT INITIAL.
+
+*Create Alv field catalogue
+        PERFORM itemalv_fieldcatalog CHANGING gt_fieldcatalog.
+
+*Create Alv layout
+        PERFORM itemalv_layout CHANGING gs_layout.
+
+*Display ALV.
+        CALL METHOD go_itemalv->set_table_for_first_display
+          EXPORTING
+            is_layout       = gs_layout
+            i_save          = 'A'
+          CHANGING
+            it_outtab       = gt_itemalvdata
+            it_fieldcatalog = gt_fieldcatalog.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        ENDIF.
+
+*Create object of the local event handling class and setting handler methods
+        go_event_handle = NEW #( ).
+
+*Handle double click in itemalv.
+        SET HANDLER go_event_handle->handle_double_click FOR go_itemalv.
+
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Form itemalv_fieldcatalog
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LT_FIELDCATALOG
+*&---------------------------------------------------------------------*
+FORM itemalv_fieldcatalog  CHANGING c_t_fieldcatalog TYPE lvc_t_fcat.
+
+  DATA:lv_fieldname TYPE dfies-fieldname.
+
+  DATA:
+    ls_fcat         TYPE lvc_s_fcat,
+    lo_struct       TYPE REF TO cl_abap_structdescr,
+    lt_comp         TYPE cl_abap_structdescr=>component_table,
+    lt_dfies        TYPE TABLE OF dfies,
+    lt_fixed_values TYPE ddfixvalues.
+
+*Get fields of structure ZOGS_STR_TE_ITEM
+  lo_struct ?= cl_abap_typedescr=>describe_by_name( 'ZOGS_STR_TE_ITEM' ).
+  lt_comp  = lo_struct->get_components( ).
+
+  LOOP AT lt_comp ASSIGNING FIELD-SYMBOL(<lfs_field>).
+    ls_fcat-fieldname = <lfs_field>-name.
+
+    CLEAR:lt_dfies,lt_fixed_values,lv_fieldname.
+
+    lv_fieldname = <lfs_field>-name.
+    CALL FUNCTION 'DDIF_FIELDINFO_GET'
+      EXPORTING
+        tabname        = 'ZOGS_STR_TE_ITEM'
+        fieldname      = lv_fieldname
+        langu          = sy-langu
+      TABLES
+        dfies_tab      = lt_dfies
+        fixed_values   = lt_fixed_values
+      EXCEPTIONS
+        not_found      = 1
+        internal_error = 2
+        OTHERS         = 3.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ELSE.
+
+      IF line_exists( lt_dfies[ 1 ] ).
+        ls_fcat-coltext = lt_dfies[ 1 ]-fieldtext.
+        ls_fcat-outputlen = lt_dfies[ 1 ]-leng.
+      ENDIF.
+
+    ENDIF.
+
+    IF ls_fcat-fieldname = 'SUB_CONDITION_TYPE'.
+      ls_fcat-coltext = TEXT-004.
+    ENDIF.
+
+    APPEND ls_fcat TO c_t_fieldcatalog.
+    CLEAR ls_fcat.
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form itemalv_layout
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LS_LAYO
+*&---------------------------------------------------------------------*
+FORM itemalv_layout  CHANGING c_s_layout TYPE lvc_s_layo.
+
+  c_s_layout-cwidth_opt = abap_true.
+  c_s_layout-zebra = abap_true.
+  c_s_layout-no_toolbar = abap_true.
+  c_s_layout-sel_mode = 'A'.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0101  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0101 INPUT.
+
+*Store subitemalv data to save in database.
+  PERFORM store_subitemalv_data.
+
+  CASE sy-ucomm.
+    WHEN 'UP'.
+      PERFORM free_itemalv_objects.
+      LEAVE  TO SCREEN 0.
+    WHEN 'EXIT'.
+      PERFORM free_itemalv_objects.
+      LEAVE  PROGRAM.
+    WHEN 'BACK'.
+      PERFORM free_itemalv_objects.
+      LEAVE  TO SCREEN 0.
+    WHEN 'SAVE'.
+      PERFORM save_to_database.
+      PERFORM refresh_itemalv.
+      PERFORM refresh_subitemalv.
+
+  ENDCASE.
+
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& Form subitemalv_layout
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LS_LAYOUT
+*&---------------------------------------------------------------------*
+FORM subitemalv_layout  CHANGING c_s_layout TYPE lvc_s_layo.
+
+  c_s_layout-cwidth_opt = abap_true.
+  c_s_layout-zebra = abap_true.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form subitemalv_fieldcatalog
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LT_FIELDCATALOG
+*&---------------------------------------------------------------------*
+FORM subitemalv_fieldcatalog  USING i_s_selected_row TYPE ty_itemalvdata
+                                                CHANGING c_t_fieldcatalog TYPE lvc_t_fcat.
+
+  DATA:lv_fieldname TYPE dfies-fieldname.
+
+  DATA:
+    ls_fcat         TYPE lvc_s_fcat,
+    lt_dfies        TYPE TABLE OF dfies,
+    lt_fixed_values TYPE ddfixvalues.
+
+  LOOP AT gt_subitemalv_prop ASSIGNING FIELD-SYMBOL(<lfs_gt_subitemalv>)
+    WHERE condition_type = i_s_selected_row-sub_condition_type.
+    ls_fcat-fieldname = <lfs_gt_subitemalv>-field.
+    ls_fcat-col_pos = <lfs_gt_subitemalv>-item_no.
+
+    CLEAR:lt_dfies,lt_fixed_values,lv_fieldname.
+
+    lv_fieldname = <lfs_gt_subitemalv>-field.
+    CALL FUNCTION 'DDIF_FIELDINFO_GET'
+      EXPORTING
+        tabname        = 'ZOGS_STR_TE_SUBITEM'
+        fieldname      = lv_fieldname
+        langu          = sy-langu
+      TABLES
+        dfies_tab      = lt_dfies
+        fixed_values   = lt_fixed_values
+      EXCEPTIONS
+        not_found      = 1
+        internal_error = 2
+        OTHERS         = 3.
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ELSE.
+      IF line_exists( lt_dfies[ 1 ] ).
+        ls_fcat-coltext = lt_dfies[ 1 ]-fieldtext.
+        ls_fcat-outputlen = lt_dfies[ 1 ]-leng.
+      ENDIF.
+    ENDIF.
+
+*Enable field input.
+    IF <lfs_gt_subitemalv>-editable EQ abap_true.
+      ls_fcat-edit = abap_true.
+    ENDIF.
+
+*Enable for search help.
+    IF <lfs_gt_subitemalv>-enable_search EQ abap_true.
+      ls_fcat-f4availabl = abap_true.
+    ENDIF.
+
+    IF <lfs_gt_subitemalv>-field EQ 'QUANTITY'.
+      ls_fcat-ref_field = 'MENGE'.
+      ls_fcat-ref_table = 'EKPO'.
+    ENDIF.
+
+    APPEND ls_fcat TO c_t_fieldcatalog.
+    CLEAR ls_fcat.
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form register_edit
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM register_edit .
+
+  go_subitemalv->register_edit_event(
+    EXPORTING
+      i_event_id = cl_gui_alv_grid=>mc_evt_modified ).
+
+  go_subitemalv->register_edit_event(
+     EXPORTING
+       i_event_id = cl_gui_alv_grid=>mc_evt_enter ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form save_to_database
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM save_to_database .
+
+*Get selected rows.
+  go_itemalv->get_selected_rows(
+    IMPORTING
+      et_row_no = DATA(lt_row_no) ) .
+
+  IF lt_row_no IS INITIAL.
+    MESSAGE e001(zongs_msg) DISPLAY LIKE 'S'.
+  ELSE.
+    CLEAR gt_service_conf_no.
+    PERFORM update_header_table USING lt_row_no CHANGING gt_service_conf_no.
+    PERFORM update_item_subitem_table USING lt_row_no gt_service_conf_no.
+    PERFORM clear_variables USING lt_row_no.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form update_total_base_quantity
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LV_TOTAL_QUANTITY
+*&      --> LV_CONDITION_TYPE
+*&---------------------------------------------------------------------*
+FORM update_total_base_quantity  USING i_total_quantity TYPE menge_d
+                                                                  i_condition_type TYPE kschl.
+
+  DATA:ls_item_data TYPE ty_itemalvdata.
+
+  IF line_exists( gt_itemalvdata[ sub_condition_type = i_condition_type ] ).
+    ls_item_data = gt_itemalvdata[ sub_condition_type = i_condition_type ].
+
+    ls_item_data-base_quantity = i_total_quantity.
+    MODIFY TABLE gt_itemalvdata FROM ls_item_data TRANSPORTING base_quantity.
+    CLEAR ls_item_data.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form free_itemalv_objects
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM free_itemalv_objects .
+
+  DATA:lv_var TYPE i.
+
+* Free itemalv container.
+  CALL METHOD go_itemcont->free
+    EXCEPTIONS
+      cntl_error        = 1
+      cntl_system_error = 2
+      OTHERS            = 3.
+  IF sy-subrc <> 0.
+    IF lv_var IS NOT INITIAL.
+      CLEAR lv_var.
+    ENDIF.
+  ENDIF.
+
+* Free itemalv ALV.
+  CALL METHOD go_itemalv->free
+    EXCEPTIONS
+      cntl_error        = 1
+      cntl_system_error = 2
+      OTHERS            = 3.
+  IF sy-subrc <> 0.
+    IF lv_var IS NOT INITIAL.
+      CLEAR lv_var.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form free_subitemalv_objects
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM free_subitemalv_objects .
+
+  DATA:lv_var TYPE i.
+
+* Free subitemalv container.
+  IF go_subitemcont IS NOT INITIAL.
+
+    CALL METHOD go_subitemcont->free
+      EXCEPTIONS
+        cntl_error        = 1
+        cntl_system_error = 2
+        OTHERS            = 3.
+    IF sy-subrc <> 0.
+      IF lv_var IS NOT INITIAL.
+        CLEAR lv_var.
+      ENDIF.
+    ENDIF.
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+* Free subitemalv ALV.
+  IF go_subitemalv IS NOT INITIAL.
+
+    CALL METHOD go_subitemalv->free
+      EXCEPTIONS
+        cntl_error        = 1
+        cntl_system_error = 2
+        OTHERS            = 3.
+    IF sy-subrc <> 0.
+      IF lv_var IS NOT INITIAL.
+        CLEAR lv_var.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form subitemalv_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- GT_SUBITEMALVDATA
+*&---------------------------------------------------------------------*
+FORM subitemalv_data  USING i_s_selected_row TYPE ty_itemalvdata
+                                     CHANGING c_t_subitemalvdata TYPE zogsa_tt_str_te_subitem.
+
+  DATA(lt_subitemdata) = gt_subitemdata.
+  DELETE lt_subitemdata WHERE condition_type NE i_s_selected_row-sub_condition_type.
+
+  IF lt_subitemdata IS NOT INITIAL.
+    LOOP AT lt_subitemdata ASSIGNING FIELD-SYMBOL(<lfs_subitemdata>).
+      APPEND INITIAL LINE TO c_t_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>).
+      IF <lfs_subitemalvdata> IS ASSIGNED.
+        <lfs_subitemalvdata>-mblnr = <lfs_subitemdata>-mblnr.
+        <lfs_subitemalvdata>-mjahr = <lfs_subitemdata>-mjahr.
+        <lfs_subitemalvdata>-budat = <lfs_subitemdata>-budat.
+        <lfs_subitemalvdata>-quantity = <lfs_subitemdata>-quantity.
+        <lfs_subitemalvdata>-unit = <lfs_subitemdata>-unit.
+        <lfs_subitemalvdata>-system_no = <lfs_subitemdata>-system_no.
+        <lfs_subitemalvdata>-matnr = <lfs_subitemdata>-matnr.
+
+      ENDIF.
+    ENDLOOP.
+  ELSE.
+    LOOP AT gt_store_subitemdata ASSIGNING <lfs_subitemdata> WHERE condition_type EQ i_s_selected_row-sub_condition_type.
+      APPEND INITIAL LINE TO c_t_subitemalvdata ASSIGNING <lfs_subitemalvdata>.
+      IF <lfs_subitemalvdata> IS ASSIGNED.
+        <lfs_subitemalvdata>-mblnr = <lfs_subitemdata>-mblnr.
+        <lfs_subitemalvdata>-mjahr = <lfs_subitemdata>-mjahr.
+        <lfs_subitemalvdata>-budat = <lfs_subitemdata>-budat.
+        <lfs_subitemalvdata>-quantity = <lfs_subitemdata>-quantity.
+        <lfs_subitemalvdata>-unit = <lfs_subitemdata>-unit.
+        <lfs_subitemalvdata>-system_no = <lfs_subitemdata>-system_no.
+        <lfs_subitemalvdata>-matnr = <lfs_subitemdata>-matnr.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_month_start_end_day
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LV_CNF_M
+*&      --> LV_YEAR
+*&---------------------------------------------------------------------*
+FORM get_month_start_end_day  USING i_cnf_m TYPE ztogs_te_header-conf_period
+                                                    CHANGING c_v_first_day TYPE sy-datum
+                                                                      c_v_last_day TYPE sy-datum.
+  DATA:
+    lv_month TYPE fcmnr,
+    lv_year  TYPE gjahr.
+
+  CLEAR:c_v_first_day,c_v_last_day.
+
+  lv_month = i_cnf_m.
+  lv_year = syst-datum+0(4).
+
+  CALL FUNCTION 'OIL_MONTH_GET_FIRST_LAST'
+    EXPORTING
+      i_month     = lv_month
+      i_year      = lv_year
+    IMPORTING
+      e_first_day = c_v_first_day
+      e_last_day  = c_v_last_day
+    EXCEPTIONS
+      wrong_date  = 1
+      OTHERS      = 2.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+    WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_subitemalv_properties
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM get_subitemalv_properties .
+
+  IF gt_itemalvdata IS NOT INITIAL.
+
+    SELECT *
+    FROM ztogs_te_con_prt
+    INTO TABLE gt_subitemalv_prop
+    FOR ALL ENTRIES IN gt_itemalvdata
+    WHERE tcode = sy-tcode AND
+                condition_type = gt_itemalvdata-sub_condition_type.
+    IF sy-subrc EQ 0.
+      SORT gt_subitemalv_prop BY tcode condition_type item_no.
+    ELSE.
+      MESSAGE s016(zongs_msg) DISPLAY LIKE 'E'.
+      LEAVE TO LIST-PROCESSING.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_subitemalv_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LV_CONDITION_TYPE
+*&      --> LS_IMPORT_QTY_CAL
+*&      <-- LV_MSG
+*&      <-- LV_MSGTYPE
+*&      <-- LT_SUBITEMALV_DATA
+*&      <-- CLEAR
+*&      <-- LS_IMPORT_QTY_CAL
+*&---------------------------------------------------------------------*
+FORM get_subitemalv_data  USING i_condition_type TYPE kschl
+                                                       i_s_import_qty_cal TYPE zogs_str_import_qty_cal
+                                            CHANGING c_v_msg  TYPE char50
+                                                              c_v_msgtype TYPE char1
+                                                              c_t_subitemalv_data TYPE zogsa_tt_str_te_subitem.
+
+  DATA:lv_fm_name TYPE string.
+
+  CLEAR:c_v_msg,
+             c_v_msgtype,
+             c_t_subitemalv_data,
+             lv_fm_name.
+
+*Get FM name according to condition type.
+  SELECT SINGLE quantity_fm
+  FROM zogs_ts_contype
+  INTO lv_fm_name
+  WHERE kschl EQ i_condition_type AND
+              entry_type EQ '01'. "Automatic
+  IF sy-subrc EQ 0 AND
+      lv_fm_name IS NOT INITIAL.
+
+    CALL FUNCTION lv_fm_name
+      EXPORTING
+        i_datatype = i_s_import_qty_cal
+      IMPORTING
+        e_t_data   = c_t_subitemalv_data
+        e_msg      = c_v_msg
+        e_msgtype  = c_v_msgtype.
+  ELSE.
+    c_v_msg = TEXT-002 && i_condition_type.
+    c_v_msgtype = 'E'.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form set_values_in_output
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM set_values_in_output .
+
+  CLEAR:gv_kunnr,
+             gv_werks,
+             gv_werks_description,
+             gv_kunnr_description.
+
+  gv_kunnr = lv_cust.
+  gv_werks = lv_werks.
+
+  SELECT SINGLE name1
+  FROM t001w
+  INTO @DATA(lv_werks_name1)
+  WHERE werks EQ @gv_werks AND
+              spras  EQ @sy-langu.
+  IF sy-subrc EQ 0.
+    gv_werks_description = lv_werks_name1.
+  ENDIF.
+
+  SELECT SINGLE name1
+  FROM kna1
+  INTO @DATA(lv_kunnr_name1)
+  WHERE kunnr EQ @gv_kunnr AND
+              spras EQ @sy-langu.
+  IF sy-subrc EQ 0.
+    gv_kunnr_description = lv_kunnr_name1.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form exclude_subitemalv_buttons
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LT_EXCLUDE_BUTTONS
+*&---------------------------------------------------------------------*
+FORM exclude_subitemalv_buttons  CHANGING c_t_exclude_buttons
+                                                        TYPE ui_functions.
+
+  CLEAR c_t_exclude_buttons.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING FIELD-SYMBOL(<lfs_exc_buttons>).
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_cut.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_copy.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_undo.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_append_row.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_copy_row.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_paste.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_paste_new_row.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_info.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_detail.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_check.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_refresh.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_find.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_find_more.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_filter.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_print.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_views.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_average.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_minimum.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_maximum.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_count.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_sort_asc.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_sort_dsc.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_print_back.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_graph.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_mb_export.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_current_variant.
+  ENDIF.
+
+  APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+  IF <lfs_exc_buttons> IS ASSIGNED.
+    <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_sum.
+  ENDIF.
+
+*Get Entry type of condition type.
+  SELECT SINGLE entry_type
+  FROM zogs_ts_contype
+  INTO @DATA(lv_entry_type)
+  WHERE kschl EQ @gv_sel_condition_type.
+  IF sy-subrc EQ 0.
+
+    IF lv_entry_type EQ '01'. "Automatic
+      APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+      IF <lfs_exc_buttons> IS ASSIGNED.
+        <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_insert_row.
+      ENDIF.
+
+      APPEND INITIAL LINE TO c_t_exclude_buttons ASSIGNING <lfs_exc_buttons>.
+      IF <lfs_exc_buttons> IS ASSIGNED.
+        <lfs_exc_buttons> = cl_gui_alv_grid=>mc_fc_loc_delete_row.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form register_for_searchhelp
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LS_SELECTED_ROW
+*&---------------------------------------------------------------------*
+FORM register_for_searchhelp  USING
+                                          i_s_selected_row TYPE ty_itemalvdata.
+
+  DATA:
+    lt_f4_fields TYPE lvc_t_f4,
+    ls_f4_fields TYPE lvc_s_f4.
+
+  LOOP AT gt_subitemalv_prop ASSIGNING FIELD-SYMBOL(<lfs_gt_subitemalv>)
+    WHERE tcode = sy-tcode AND
+                condition_type = i_s_selected_row-sub_condition_type AND
+                enable_search = abap_true.
+
+    ls_f4_fields-fieldname = <lfs_gt_subitemalv>-field.
+    ls_f4_fields-register    = abap_true.
+    INSERT ls_f4_fields INTO TABLE lt_f4_fields.
+    CLEAR ls_f4_fields.
+
+  ENDLOOP.
+
+  IF lt_f4_fields IS NOT INITIAL.
+    CALL METHOD go_subitemalv->register_f4_for_fields
+      EXPORTING
+        it_f4 = lt_f4_fields.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_search_enabled_field
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> GV_SEL_CONDITION_TYPE
+*&      <-- GV_SEARCH_FIELDNAME
+*&---------------------------------------------------------------------*
+FORM get_search_enabled_field  USING i_sel_condition_type TYPE kschl
+                               CHANGING c_t_search_fieldname LIKE gt_search_fieldname.
+
+  DATA:lv_var TYPE i.
+
+  CLEAR c_t_search_fieldname.
+  SELECT field
+  FROM ztogs_te_con_prt
+  INTO TABLE c_t_search_fieldname
+  WHERE tcode EQ 'ZOGS_INV_CONF' AND
+              condition_type EQ i_sel_condition_type AND
+              enable_search EQ abap_true.
+  IF sy-subrc NE 0.
+    IF lv_var IS NOT INITIAL.
+      CLEAR lv_var.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form store_subitemalv_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM store_subitemalv_data .
+
+  IF go_subitemalv IS BOUND.
+    CALL METHOD go_subitemalv->check_changed_data( ).
+  ENDIF.
+
+*Check entry type of condition type.
+  SELECT SINGLE entry_type
+  FROM zogs_ts_contype
+  INTO @DATA(lv_entry_type)
+  WHERE kschl EQ @gv_sel_condition_type.
+  IF sy-subrc EQ 0 AND lv_entry_type NE '01'. "Automatic
+
+    DELETE gt_store_subitemdata WHERE condition_type = gv_sel_condition_type.
+    LOOP AT gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>).
+      APPEND INITIAL LINE TO gt_store_subitemdata ASSIGNING FIELD-SYMBOL(<lfs_store_subitemdata>).
+      IF <lfs_store_subitemdata> IS ASSIGNED.
+        <lfs_store_subitemdata>-condition_type = gv_sel_condition_type.
+        MOVE-CORRESPONDING <lfs_subitemalvdata> TO <lfs_store_subitemdata>.
+      ENDIF.
+    ENDLOOP.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form update_header_table
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM update_header_table USING i_t_row_no TYPE lvc_t_roid
+         CHANGING c_t_service_conf_no LIKE gt_service_conf_no.
+
+  DATA:
+    lv_number      TYPE i.
+
+  DATA:
+        lt_header_table TYPE STANDARD TABLE OF ztogs_te_header.
+
+  CLEAR:lv_number,
+            lt_header_table,
+            c_t_service_conf_no.
+
+  LOOP AT i_t_row_no ASSIGNING FIELD-SYMBOL(<lfs_row_no>).
+
+*Generate Service Confirmatin No.
+    CALL FUNCTION 'NUMBER_GET_NEXT'
+      EXPORTING
+        nr_range_nr             = '01'
+        object                  = 'ZD_OGS_TER'
+      IMPORTING
+        number                  = lv_number
+      EXCEPTIONS
+        interval_not_found      = 1
+        number_range_not_intern = 2
+        object_not_found        = 3
+        quantity_is_0           = 4
+        quantity_is_not_1       = 5
+        interval_overflow       = 6
+        buffer_overflow         = 7
+        OTHERS                  = 8.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ELSE.
+
+*Return generated service confirmation numbers.
+      APPEND INITIAL LINE TO c_t_service_conf_no ASSIGNING FIELD-SYMBOL(<lfs_service_conf_no>).
+      IF <lfs_service_conf_no> IS ASSIGNED.
+        <lfs_service_conf_no>-row_id = <lfs_row_no>-row_id.
+        <lfs_service_conf_no>-service_conf_no = lv_number.
+      ENDIF.
+
+      APPEND INITIAL LINE TO lt_header_table ASSIGNING FIELD-SYMBOL(<lfs_header_table>).
+      IF <lfs_header_table> IS ASSIGNED.
+        <lfs_header_table>-mandt = sy-mandt.
+        <lfs_header_table>-service_confirm_no = lv_number.
+        CONDENSE <lfs_header_table>-service_confirm_no.
+        <lfs_header_table>-bukrs = lv_comp.
+        <lfs_header_table>-werks = lv_werks.
+        <lfs_header_table>-kunnr = lv_cust.
+        <lfs_header_table>-conf_period = lv_cnf_m.
+*<lfs_header_table>-BILL_PERIOD =
+        <lfs_header_table>-status = '01'.
+        <lfs_header_table>-confirmed_by = sy-uname.
+        <lfs_header_table>-confirmation_date = sy-datlo.
+        <lfs_header_table>-confirmation_time = sy-timlo.
+        <lfs_header_table>-chrg_type = gv_charge_type.
+
+        IF line_exists( gt_itemalvdata[ <lfs_row_no>-row_id ] ).
+          <lfs_header_table>-vbeln = gt_itemalvdata[ <lfs_row_no>-row_id ]-vbeln.
+        ENDIF.
+
+      ENDIF.
+
+      CLEAR lv_number.
+
+    ENDIF.
+  ENDLOOP.
+
+  INSERT ztogs_te_header FROM TABLE lt_header_table.
+  CLEAR lt_header_table.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form update_item_table
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM update_item_subitem_table USING i_t_row_no TYPE lvc_t_roid
+                                    i_t_service_conf_no LIKE gt_service_conf_no.
+
+  DATA:
+    lv_var          TYPE i,
+    lv_item_counter TYPE posnr.
+
+  DATA:
+    lt_itemtable    TYPE STANDARD TABLE OF ztogs_te_item,
+    lt_subitemtable TYPE STANDARD TABLE OF ztogs_te_subitem.
+
+  LOOP AT i_t_row_no ASSIGNING FIELD-SYMBOL(<lfs_row_no>).
+
+    DATA(ls_itemtabledata) = gt_itemalvdata[ <lfs_row_no>-row_id ].
+
+    IF ls_itemtabledata IS NOT INITIAL.
+
+      IF line_exists( i_t_service_conf_no[ <lfs_row_no>-row_id ] ).
+        DATA(lv_service_conf_no) = i_t_service_conf_no[ <lfs_row_no>-row_id ]-service_conf_no.
+      ENDIF.
+
+      IF lv_service_conf_no IS NOT INITIAL.
+
+*Prepare itemtable data.
+        APPEND INITIAL LINE TO lt_itemtable ASSIGNING FIELD-SYMBOL(<lfs_itemtable>).
+        IF <lfs_itemtable> IS ASSIGNED.
+          <lfs_itemtable>-mandt = sy-mandt.
+          <lfs_itemtable>-service_confirm_no = lv_service_conf_no.
+          CONDENSE <lfs_itemtable>-service_confirm_no.
+          <lfs_itemtable>-condition_type = ls_itemtabledata-sub_condition_type.
+          <lfs_itemtable>-sub_condition_type = ls_itemtabledata-sub_condition_type.
+          <lfs_itemtable>-description = ls_itemtabledata-description.
+          <lfs_itemtable>-calculation_basis = ls_itemtabledata-calculation_basis.
+          <lfs_itemtable>-base_quantity = ls_itemtabledata-base_quantity.
+          <lfs_itemtable>-unit = ls_itemtabledata-unit.
+          <lfs_itemtable>-rate = ls_itemtabledata-rate.
+          <lfs_itemtable>-currency = ls_itemtabledata-currency.
+          <lfs_itemtable>-posnr = ls_itemtabledata-posnr.
+        ENDIF.
+
+*Prepare subitemtable data.
+
+*      GT_SUBITEMDATA contains data of automatic condition types only.
+        LOOP AT gt_subitemdata ASSIGNING FIELD-SYMBOL(<lfs_subitemdata>)
+          WHERE condition_type = ls_itemtabledata-sub_condition_type.
+
+          APPEND INITIAL LINE TO lt_subitemtable ASSIGNING FIELD-SYMBOL(<lfs_subitemtable>).
+          IF <lfs_subitemtable> IS ASSIGNED.
+            lv_item_counter = lv_item_counter + 1.
+
+            <lfs_subitemtable>-mandt = sy-mandt.
+            <lfs_subitemtable>-service_confirm_no = lv_service_conf_no.
+            CONDENSE <lfs_subitemtable>-service_confirm_no.
+            <lfs_subitemtable>-condition_type = ls_itemtabledata-sub_condition_type.
+            <lfs_subitemtable>-item_no = lv_item_counter.
+            <lfs_subitemtable>-mblnr = <lfs_subitemdata>-mblnr.
+            <lfs_subitemtable>-mjahr = <lfs_subitemdata>-mjahr.
+            <lfs_subitemtable>-budat = <lfs_subitemdata>-budat.
+            <lfs_subitemtable>-quantity = <lfs_subitemdata>-quantity.
+            <lfs_subitemtable>-unit = <lfs_subitemdata>-unit.
+            <lfs_subitemtable>-system_no = <lfs_subitemdata>-system_no.
+            <lfs_subitemtable>-matnr = <lfs_subitemdata>-matnr.
+
+          ENDIF.
+        ENDLOOP.
+
+*    GT_STORE_SUBITEMDATA contains data of non automatic condition types only.
+        CLEAR lv_item_counter.
+        LOOP AT gt_store_subitemdata ASSIGNING <lfs_subitemdata>
+          WHERE condition_type = ls_itemtabledata-sub_condition_type.
+
+          APPEND INITIAL LINE TO lt_subitemtable ASSIGNING <lfs_subitemtable>.
+          IF <lfs_subitemtable> IS ASSIGNED.
+            lv_item_counter = lv_item_counter + 1.
+
+            <lfs_subitemtable>-mandt = sy-mandt.
+            <lfs_subitemtable>-service_confirm_no = lv_service_conf_no.
+            CONDENSE <lfs_subitemtable>-service_confirm_no.
+            <lfs_subitemtable>-condition_type = ls_itemtabledata-sub_condition_type.
+            <lfs_subitemtable>-item_no = lv_item_counter.
+            <lfs_subitemtable>-mblnr = <lfs_subitemdata>-mblnr.
+            <lfs_subitemtable>-mjahr = <lfs_subitemdata>-mjahr.
+            <lfs_subitemtable>-budat = <lfs_subitemdata>-budat.
+            <lfs_subitemtable>-quantity = <lfs_subitemdata>-quantity.
+            <lfs_subitemtable>-unit = <lfs_subitemdata>-unit.
+            <lfs_subitemtable>-system_no = <lfs_subitemdata>-system_no.
+            <lfs_subitemtable>-matnr = <lfs_subitemdata>-matnr.
+
+          ENDIF.
+        ENDLOOP.
+
+        CLEAR:ls_itemtabledata,
+                   lv_service_conf_no.
+
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  IF lt_itemtable IS NOT INITIAL.
+    INSERT ztogs_te_item FROM TABLE lt_itemtable.
+    IF sy-subrc EQ 0.
+      IF lv_var IS NOT INITIAL.
+        CLEAR lv_var.
+      ENDIF.
+    ENDIF.
+
+    CLEAR lt_itemtable.
+  ENDIF.
+
+  IF lt_subitemtable IS NOT INITIAL.
+    INSERT ztogs_te_subitem FROM TABLE lt_subitemtable.
+    IF sy-subrc EQ 0.
+      IF lv_var IS NOT INITIAL.
+        CLEAR lv_var.
+      ENDIF.
+    ENDIF.
+
+    CLEAR lt_subitemtable.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form clear_variables
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM clear_variables USING i_t_row_no TYPE lvc_t_roid.
+
+  DATA(lt_itemalvdata) = gt_itemalvdata.
+
+  LOOP AT i_t_row_no ASSIGNING FIELD-SYMBOL(<lfs_row_no>).
+    IF line_exists( lt_itemalvdata[ <lfs_row_no>-row_id ] ).
+      DATA(ls_itemalvdata) = lt_itemalvdata[ <lfs_row_no>-row_id ].
+
+      DELETE gt_itemalvdata WHERE sub_condition_type EQ ls_itemalvdata-sub_condition_type.
+      DELETE gt_subitemdata WHERE condition_type EQ ls_itemalvdata-sub_condition_type.
+      DELETE gt_store_subitemdata WHERE condition_type EQ ls_itemalvdata-sub_condition_type.
+      CLEAR ls_itemalvdata.
+    ENDIF.
+  ENDLOOP.
+
+  CLEAR:lt_itemalvdata,gt_subitemalvdata.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_data_on_searchhelp
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> E_FIELDNAME
+*&      --> ES_ROW_NO
+*&      --> ER_EVENT_DATA
+*&---------------------------------------------------------------------*
+FORM get_data_on_searchhelp  USING i_fieldname TYPE lvc_fname
+                                                            i_s_row_no TYPE lvc_s_roid
+                                                            i_r_event_data TYPE REF TO cl_alv_event_data.
+
+  DATA:
+    lv_total_quantity TYPE menge_d,
+    lv_field_changed  TYPE lvc_fname,
+    lv_f4help_fm      TYPE zogs_f4help_fm.
+
+  DATA:
+    ls_stable         TYPE lvc_s_stbl,
+    ls_f4help_data    TYPE zogs_str_te_subitem,
+    ls_f4help_import  TYPE zogs_str_f4help_import,
+    lt_default_fields TYPE lvc_t_tabl.
+
+  FIELD-SYMBOLS:<lfs_field> TYPE any,
+                <lfs_value> TYPE any.
+
+  READ TABLE gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>) INDEX i_s_row_no-row_id.
+  IF <lfs_subitemalvdata> IS ASSIGNED.
+
+*Get F4help FM to derive subitemalv data.
+    CLEAR lv_field_changed.
+    lv_field_changed = i_fieldname.
+    PERFORM get_derive_subitemalv_qty_fm  USING lv_field_changed
+                                                                    CHANGING lv_f4help_fm.
+    IF  lv_f4help_fm IS NOT INITIAL.
+
+      CLEAR:ls_f4help_import,ls_f4help_data,lt_default_fields.
+      CALL FUNCTION lv_f4help_fm
+        EXPORTING
+          i_s_f4help_import  = ls_f4help_import
+          i_f4help_fieldname = i_fieldname
+          i_derive_data_ind  = 'S'
+        IMPORTING
+          e_s_f4help_data    = ls_f4help_data
+          e_t_default_fields = lt_default_fields.
+      IF ls_f4help_data IS NOT INITIAL.
+
+        LOOP AT lt_default_fields ASSIGNING FIELD-SYMBOL(<lfs_default_fields>).
+          ASSIGN COMPONENT <lfs_default_fields>-value OF STRUCTURE <lfs_subitemalvdata> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            ASSIGN COMPONENT <lfs_default_fields>-value OF STRUCTURE ls_f4help_data TO <lfs_value>.
+            IF <lfs_value> IS ASSIGNED.
+              MOVE <lfs_value> TO <lfs_field>.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+
+*Update total base quantity in itemalv on basis of derived quantity
+        CLEAR lv_total_quantity.
+        LOOP AT gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemdata>).
+          lv_total_quantity = lv_total_quantity + <lfs_subitemdata>-quantity.
+        ENDLOOP.
+
+*Update calculated total base quantity in itemalv.
+        PERFORM upd_cal_base_qty_in_itemalv USING lv_total_quantity.
+
+        CLEAR ls_stable.
+        ls_stable = 'XX'.
+        CALL METHOD go_subitemalv->refresh_table_display
+          EXPORTING
+            is_stable      = ls_stable
+            i_soft_refresh = abap_true
+          EXCEPTIONS
+            finished       = 1
+            OTHERS         = 2.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        ENDIF.
+
+        i_r_event_data->m_event_handled = abap_true.
+
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form read_configurations
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM read_configurations .
+
+  CLEAR:gv_report_title,
+             gv_charge_type.
+
+  SELECT source2,
+              value1
+  FROM zgbl_param
+  INTO TABLE @DATA(lt_parameters)
+  WHERE ricefw EQ 'TERMINAL_SERV' AND
+              source1 EQ @sy-tcode.
+  IF sy-subrc EQ 0.
+
+*Check Report Title.
+    IF line_exists( lt_parameters[ source2 = 'TITLE' ] ).
+      gv_report_title = lt_parameters[ source2 = 'TITLE' ]-value1.
+    ELSE.
+      MESSAGE s004(zongs_msg) DISPLAY LIKE 'E'.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+*Check Charge Type.
+    IF line_exists( lt_parameters[ source2 = 'CHRG_TYPE' ] ).
+      gv_charge_type = lt_parameters[ source2 = 'CHRG_TYPE' ]-value1.
+    ELSE.
+      MESSAGE s003(zongs_msg) DISPLAY LIKE 'E'.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+  ELSE.
+    MESSAGE s015(zongs_msg) DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form upd_subitemalv_qty_on_delete
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> ER_DATA_CHANGED
+*&---------------------------------------------------------------------*
+FORM upd_itemalv_qty_on_subitem_del  USING i_r_data_changed
+                                  TYPE REF TO cl_alv_changed_data_protocol.
+
+  DATA:
+    lv_tabix          TYPE sy-tabix,
+    lv_total_quantity TYPE menge_d.
+
+  IF i_r_data_changed->mt_deleted_rows IS NOT INITIAL.
+
+    CLEAR:lv_tabix,
+               lv_total_quantity.
+
+    LOOP AT gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>).
+      lv_tabix = sy-tabix.
+
+      IF line_exists( i_r_data_changed->mt_deleted_rows[ row_id = lv_tabix ] ).
+      ELSE.
+        lv_total_quantity = lv_total_quantity + <lfs_subitemalvdata>-quantity.
+      ENDIF.
+
+    ENDLOOP.
+
+*Update calculated total base quantity in itemalv.
+    PERFORM upd_cal_base_qty_in_itemalv USING lv_total_quantity.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form upd_itemqty_on_subitem_qty_chg
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> ER_DATA_CHANGED
+*&---------------------------------------------------------------------*
+FORM upd_itemqty_on_subitem_qty_chg  USING i_r_data_changed
+                                  TYPE REF TO cl_alv_changed_data_protocol.
+
+  DATA:
+    lv_tabix          TYPE sy-tabix,
+    lv_total_quantity TYPE menge_d.
+
+  IF line_exists( i_r_data_changed->mt_good_cells[ fieldname = 'QUANTITY' ] ).
+
+    DATA(ls_changed_quantity) = i_r_data_changed->mt_mod_cells[ fieldname = 'QUANTITY'  ].
+
+    CLEAR:lv_tabix,lv_total_quantity.
+    LOOP AT gt_subitemalvdata ASSIGNING FIELD-SYMBOL(<lfs_subitemalvdata>).
+      lv_tabix = sy-tabix.
+
+      IF lv_tabix EQ ls_changed_quantity-row_id.
+        lv_total_quantity = lv_total_quantity + ls_changed_quantity-value.
+      ELSE.
+        lv_total_quantity = lv_total_quantity + <lfs_subitemalvdata>-quantity.
+      ENDIF.
+
+    ENDLOOP.
+
+*Update calculated total base quantity in itemalv.
+    PERFORM upd_cal_base_qty_in_itemalv USING lv_total_quantity.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form upd_cal_base_qty_in_itemalv
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LV_TOTAL_QUANTITY
+*&---------------------------------------------------------------------*
+FORM upd_cal_base_qty_in_itemalv  USING i_total_quantity
+                                                         TYPE menge_d.
+
+  IF line_exists( gt_itemalvdata[ sub_condition_type = gv_sel_condition_type ] ).
+    DATA(ls_itemalvdata) = gt_itemalvdata[ sub_condition_type = gv_sel_condition_type ].
+    ls_itemalvdata-base_quantity = i_total_quantity.
+    MODIFY TABLE gt_itemalvdata FROM ls_itemalvdata TRANSPORTING base_quantity.
+    CLEAR ls_itemalvdata.
+  ENDIF.
+
+*Refresh Itemalv.
+  PERFORM refresh_itemalv.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_derive_subitemalv_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> LW_FIELD_CHANGED
+*&---------------------------------------------------------------------*
+FORM get_derive_subitemalv_qty_fm
+                      USING i_field_changed TYPE lvc_fname
+                      CHANGING c_f4help_fm TYPE zogs_f4help_fm.
+
+*Get F4help FM
+  CLEAR c_f4help_fm.
+  SELECT f4help_fm
+  FROM ztogs_te_con_prt
+  UP TO 1 ROWS
+  INTO @DATA(lv_f4help_fm)
+  WHERE tcode EQ @sy-tcode AND
+              condition_type EQ @gv_sel_condition_type AND
+              field EQ @i_field_changed AND
+              enable_search EQ @abap_true ORDER BY f4help_fm.
+  ENDSELECT.
+  IF sy-subrc EQ 0.
+    c_f4help_fm = lv_f4help_fm.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form refresh_itemalv
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM refresh_itemalv .
+
+  IF go_itemalv IS BOUND.
+    CALL METHOD go_itemalv->refresh_table_display( ).
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form refresh_subitemalv
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM refresh_subitemalv .
+
+  IF go_subitemalv IS BOUND.
+    CALL METHOD go_subitemalv->refresh_table_display( ).
+    CALL METHOD cl_gui_cfw=>flush.
+  ENDIF.
+
+ENDFORM.
+------------------------------------------------------------------------------------------------
