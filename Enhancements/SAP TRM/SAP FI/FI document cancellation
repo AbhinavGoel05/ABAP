@@ -1,0 +1,80 @@
+Transaction Code: FB08 
+
+FI document cancellation 
+
+    METHOD cancel_fi_documents. 
+ 
+    DATA:lv_objkey  TYPE awkey, 
+         lv_bus_act TYPE glvor. 
+ 
+    DATA:ls_reversal TYPE bapiacrev. 
+ 
+    DATA:lt_return TYPE bapiret2_t. 
+ 
+    LOOP AT gt_posting_doc ASSIGNING FIELD-SYMBOL(<lfs_posting_doc>). 
+ 
+      IF <lfs_posting_doc>-posting_doc IS NOT INITIAL. 
+        IF line_exists( gt_cancel_doc[ bukrs = <lfs_posting_doc>-ccode 
+                                       belnr = <lfs_posting_doc>-posting_doc 
+                                       gjahr = <lfs_posting_doc>-year ] ). 
+ 
+          DATA(ls_cancel_doc) = gt_cancel_doc[ bukrs = <lfs_posting_doc>-ccode 
+                                               belnr = <lfs_posting_doc>-posting_doc 
+                                               gjahr = <lfs_posting_doc>-year ]. 
+        ENDIF. 
+      ENDIF. 
+ 
+      IF <lfs_posting_doc>-rev_post_doc IS NOT INITIAL. 
+        IF line_exists( gt_cancel_doc[ bukrs = <lfs_posting_doc>-ccode 
+                                       belnr = <lfs_posting_doc>-rev_post_doc 
+                                       gjahr = <lfs_posting_doc>-year ] ). 
+ 
+          ls_cancel_doc = gt_cancel_doc[ bukrs = <lfs_posting_doc>-ccode 
+                                         belnr = <lfs_posting_doc>-rev_post_doc 
+                                         gjahr = <lfs_posting_doc>-year ]. 
+ 
+        ENDIF. 
+      ENDIF. 
+ 
+      CLEAR ls_reversal. 
+      ls_reversal-obj_type   = ls_cancel_doc-awtyp. 
+      ls_reversal-obj_key    = ls_cancel_doc-awkey. 
+      ls_reversal-obj_key_r  = ls_cancel_doc-awkey. 
+      ls_reversal-pstng_date = <lfs_posting_doc>-posting_date. 
+      ls_reversal-reason_rev = '01'. 
+ 
+      lv_bus_act = 'RFBU'. 
+ 
+      CALL FUNCTION 'BAPI_ACC_DOCUMENT_REV_POST' 
+        EXPORTING 
+          reversal = ls_reversal 
+          bus_act  = lv_bus_act 
+        IMPORTING 
+          obj_key  = lv_objkey 
+        TABLES 
+          return   = lt_return. 
+      IF lt_return IS NOT INITIAL. 
+ 
+        IF line_exists( lt_return[ type = 'S' ] ). 
+ 
+          CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' 
+            EXPORTING 
+              wait = abap_true. 
+ 
+          DELETE FROM zmm_t_ageingdocs WHERE company_code = <lfs_posting_doc>-ccode AND 
+                                             zyear        = <lfs_posting_doc>-year  AND 
+                                             period       = <lfs_posting_doc>-period. 
+          gv_stop_cancellation = abap_true. 
+        ELSE. 
+          CLEAR gv_stop_cancellation. 
+          DATA(ls_return) = lt_return[ 2 ]. 
+          MESSAGE ID ls_return-id TYPE 'S' NUMBER ls_return-number 
+          WITH ls_return-message_v1 ls_return-message_v2 ls_return-message_v3 ls_return-message_v4 DISPLAY LIKE 'E'. 
+          LEAVE TO LIST-PROCESSING. 
+        ENDIF. 
+ 
+      ENDIF. 
+ 
+    ENDLOOP. 
+ 
+  ENDMETHOD. 
