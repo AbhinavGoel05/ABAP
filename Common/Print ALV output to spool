@@ -1,0 +1,152 @@
+Code to print ALV output to spool. 
+
+*&---------------------------------------------------------------------* 
+*& Include ZTRI_BP_MAIN_CR_SEG_UPD_OUTPUT 
+*&---------------------------------------------------------------------* 
+ 
+ DATA:lo_alv          TYPE REF TO cl_salv_table, 
+      lo_column       TYPE REF TO cl_salv_column, 
+      lo_alv_toolbar  TYPE REF TO cl_salv_functions_list, 
+      lo_cols         TYPE REF TO cl_salv_columns, 
+      lo_table_descr  TYPE REF TO cl_abap_tabledescr, 
+      lo_struct_descr TYPE REF TO cl_abap_structdescr, 
+      lo_print        TYPE REF TO cl_salv_print. 
+ 
+ DATA:lv_long_text   TYPE scrtext_l, 
+      lv_medium_text TYPE scrtext_m, 
+      lv_short_text  TYPE scrtext_s. 
+ 
+ DATA:ls_pparams TYPE pri_params. 
+ 
+ DATA:lt_columns TYPE abap_compdescr_tab. 
+ 
+ SORT gt_output BY partner. 
+ 
+ TRY. 
+ 
+     cl_salv_table=>factory( 
+       IMPORTING 
+         r_salv_table = lo_alv 
+       CHANGING 
+         t_table      = gt_output ). 
+ 
+*Optimize column width 
+     lo_cols = lo_alv->get_columns( ). 
+     lo_cols->set_optimize( abap_true ). 
+ 
+*Get columns 
+     lo_table_descr ?= cl_abap_typedescr=>describe_by_data( gt_output ). 
+     lo_struct_descr ?= lo_table_descr->get_table_line_type( ). 
+     lt_columns = lo_struct_descr->components. 
+ 
+     LOOP AT lt_columns ASSIGNING FIELD-SYMBOL(<lfs_column>). 
+       TRY. 
+           lo_column = lo_cols->get_column( <lfs_column>-name ). 
+ 
+*Hide columns 
+           IF <lfs_column>-name EQ 'MANDT'                 OR 
+              <lfs_column>-name EQ 'XBLOCKED'              OR 
+              <lfs_column>-name EQ 'COORDINATOR'           OR 
+              <lfs_column>-name EQ 'CUST_GROUP'            OR 
+              <lfs_column>-name EQ 'FOLLOW_UP_DT'          OR 
+              <lfs_column>-name EQ 'BLOCK_REASON'          OR 
+              <lfs_column>-name EQ 'LIM_VAL_DATE_REQ'      OR 
+              <lfs_column>-name EQ 'REQ_DATE'              OR 
+              <lfs_column>-name EQ 'ITEM_ERROR'            OR 
+              <lfs_column>-name EQ 'LOG_HNDL'              OR 
+              <lfs_column>-name EQ 'DUMMY_SGM_INCL_EEW_PS' OR 
+              <lfs_column>-name EQ 'AUTOMATIC_REQ'         OR 
+              <lfs_column>-name EQ 'XCRITICAL'             OR 
+              <lfs_column>-name EQ 'X_LIMIT_ZERO'          OR 
+              <lfs_column>-name EQ 'IS_SUCCESS'. 
+ 
+             lo_column->set_visible( value = if_salv_c_bool_sap=>false ). 
+             CONTINUE. 
+           ENDIF. 
+ 
+           CLEAR:lv_long_text, 
+                 lv_medium_text, 
+                 lv_short_text. 
+ 
+           IF <lfs_column>-name EQ 'PARTNER'. 
+             lv_long_text = 'Business Partner'. 
+             lv_medium_text = 'Business Partner'. 
+             lv_short_text = 'BP'. 
+           ELSEIF <lfs_column>-name EQ 'CREDIT_SGMNT'. 
+             lv_long_text = 'Credit Segment'. 
+             lv_medium_text = 'Credit Segment'. 
+             lv_short_text = 'Credit_Seg'. 
+           ELSEIF <lfs_column>-name EQ 'CREDIT_LIMIT'. 
+             lv_long_text = 'Credit Limit'. 
+             lv_medium_text = 'Credit Limit'. 
+             lv_short_text = 'Credit Limit'. 
+           ELSEIF <lfs_column>-name EQ 'LIMIT_VALID_DATE'. 
+             lv_long_text = 'Valid To Date'. 
+             lv_medium_text = 'Valid To Date'. 
+             lv_short_text = 'Valid To Date'. 
+           ELSEIF <lfs_column>-name EQ 'LIMIT_CHG_DATE'. 
+             lv_long_text = 'Change Date for Credit Limit'. 
+             lv_medium_text = 'Change Date'. 
+             lv_short_text = 'Change Date'. 
+           ELSEIF <lfs_column>-name EQ 'CRED_LIM_CALC'. 
+             lv_long_text = 'Calculated Credit Limit'. 
+             lv_medium_text = 'Cal CR Limit'. 
+             lv_short_text = 'Cal CR Limit'. 
+           ELSEIF <lfs_column>-name EQ 'CRED_LIM_REQ'. 
+             lv_long_text = 'Credit Limit Requested'. 
+             lv_medium_text = 'Cal Limit Req'. 
+             lv_short_text = 'Cal Limit Req'. 
+           ELSEIF <lfs_column>-name EQ 'COMMENTS'. 
+             lv_long_text = 'Status'. 
+             lv_medium_text = 'Status'. 
+             lv_short_text = 'Status'. 
+           ENDIF. 
+ 
+           lo_column->set_long_text( lv_long_text ). 
+           lo_column->set_medium_text( lv_medium_text ). 
+           lo_column->set_short_text( lv_short_text ). 
+ 
+         CATCH cx_salv_not_found. 
+       ENDTRY. 
+     ENDLOOP. 
+ 
+*Display ALV output in foreground mode or print same output in spool in background mode 
+     IF sy-batch EQ abap_false. 
+ 
+*Set default toolbar 
+       lo_alv_toolbar = lo_alv->get_functions( ). 
+ 
+       lo_alv_toolbar->set_all( value = if_salv_c_bool_sap=>true ). 
+ 
+     ELSE. 
+ 
+       lo_print = lo_alv->get_print( ). 
+ 
+*Get print parameters 
+       CALL FUNCTION 'GET_PRINT_PARAMETERS' 
+         EXPORTING 
+           no_dialog              = abap_true 
+         IMPORTING 
+           out_parameters         = ls_pparams 
+         EXCEPTIONS 
+           archive_info_not_found = 1 
+           invalid_print_params   = 2 
+           invalid_archive_params = 3 
+           OTHERS                 = 4. 
+ 
+       CONCATENATE TEXT-005 '_' sy-datum '_' sy-uzeit INTO ls_pparams-prtxt SEPARATED BY space. 
+       CONDENSE ls_pparams-prtxt. 
+ 
+       IF lo_print IS BOUND. 
+         DATA(ls_print_ctrl) = lo_print->get_print_control( ). 
+         ls_print_ctrl-pri_params = ls_pparams. 
+         lo_print->set_print_control( ls_print_ctrl ). 
+         lo_print->set_print_only( if_salv_c_bool_sap=>true ). 
+       ENDIF. 
+ 
+     ENDIF. 
+ 
+     lo_alv->display( ). 
+ 
+   CATCH cx_salv_msg INTO DATA(lx_msg). 
+ ENDTRY. 
