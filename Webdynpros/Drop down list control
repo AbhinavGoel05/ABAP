@@ -1,0 +1,73 @@
+METHOD onactionselect_off_name .
+
+*Get reference of child node
+  DATA: lo_nd_off_name TYPE REF TO if_wd_context_node.
+  lo_nd_off_name = wd_context->get_child_node( name = 'ND_OFF_NAME').
+
+* Get index of currectly selected value
+  DATA: lv_index TYPE i.
+  lv_index = lo_nd_off_name->get_lead_selection_index( ).
+
+* Read the KOSTL value from the selected index value for off name
+  IF wd_comp_controller->gt_off_name_data IS NOT INITIAL.
+
+    DATA(lv_kostl) = wd_comp_controller->gt_off_name_data[ lv_index ]-org_unit_id.
+
+*---------------------------------------------------------------------------------------
+*Set the KOSTL value in the Node ND_BDC_IP_IMMOVEABLE element
+*---------------------------------------------------------------------------------------
+*Get reference of child node
+    DATA lo_nd_nd_bdc_ip_immovable TYPE REF TO if_wd_context_node.
+    lo_nd_nd_bdc_ip_immovable = wd_context->get_child_node( name = wd_this->wdctx_nd_bdc_ip_immovable ).
+
+* Get element via lead selection
+    DATA lo_el_nd_bdc_ip_immovable TYPE REF TO if_wd_context_element.
+    lo_el_nd_bdc_ip_immovable = lo_nd_nd_bdc_ip_immovable->get_element( ).
+
+    DATA ls_nd_bdc_ip_immovable TYPE wd_this->element_nd_bdc_ip_immovable.
+
+    CLEAR ls_nd_bdc_ip_immovable.
+    lo_el_nd_bdc_ip_immovable->get_static_attributes(
+      IMPORTING
+        static_attributes = ls_nd_bdc_ip_immovable ).
+
+    ls_nd_bdc_ip_immovable-kostl = lv_kostl.
+
+*---------------------------------------------------------------------------------------
+*Set the KOSTL_2 value in the Node ND_BDC_IP_IMMOVEABLE element
+*---------------------------------------------------------------------------------------
+    wd_comp_controller->get_cost_center(
+     EXPORTING
+       iv_org_unit    = ls_nd_bdc_ip_immovable-kostl
+     IMPORTING
+       ev_cost_center = ls_nd_bdc_ip_immovable-kostl_2 ).
+
+    lo_el_nd_bdc_ip_immovable->set_static_attributes(
+      EXPORTING
+        static_attributes = ls_nd_bdc_ip_immovable ).
+
+*---------------------------------------------------------------------------------------
+*Set the Positions in the Node ND_POS_NAME
+*---------------------------------------------------------------------------------------
+
+*Get the position for the selected org unit id
+    DATA(lv_position_id) = wd_comp_controller->gt_off_name_data[ org_unit_id = lv_kostl ]-position_id.
+
+    DATA(lt_positions) = wd_comp_controller->gt_positions_name.
+    DELETE lt_positions WHERE position_id NE lv_position_id.
+
+*Get reference of child node
+    DATA:lo_nd_pos_name TYPE REF TO if_wd_context_node.
+    lo_nd_pos_name = wd_context->get_child_node( name = wd_this->wdctx_nd_pos_name ).
+
+*Map Data
+    DATA:lt_nd_pos_name_data TYPE wd_this->elements_nd_pos_name.
+
+    lt_nd_pos_name_data = VALUE #( FOR ls_positions IN lt_positions
+                                 ( pos_name = ls_positions-mc_stext ) ).
+
+    lo_nd_pos_name->bind_elements( lt_nd_pos_name_data ).
+
+  ENDIF.
+
+ENDMETHOD.
