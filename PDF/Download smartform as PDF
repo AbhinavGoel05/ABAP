@@ -1,0 +1,219 @@
+DATA : 
+      ls_ctrlop             TYPE ssfctrlop, 
+      ls_outopt             TYPE ssfcompop, 
+      ls_return             TYPE ssfcrescl, 
+      ls_doc_chng           TYPE sodocchgi1, 
+      lv_binfile_size       TYPE sood-objlen, 
+      lv_file_size          TYPE i, 
+      lv_bin_file_size_temp TYPE i, 
+      lv_filename           TYPE string. 
+ 
+    DATA: 
+      lt_record   TYPE srm_t_solisti1, 
+      lt_objbin   TYPE srm_t_solisti1, 
+      lt_objtxt   TYPE srm_t_solisti1, 
+      lt_objpack  TYPE sopcklsti1_t, 
+      lt_pdf_data TYPE tttext. 
+ 
+    CLEAR:lt_objbin,lt_objtxt,lt_objpack,ls_doc_chng. 
+ 
+*Get parameters 
+    CLEAR ls_ctrlop. 
+    ls_ctrlop-getotf = abap_true. 
+    ls_ctrlop-no_dialog = abap_true. 
+ 
+    CLEAR ls_outopt. 
+    ls_outopt-tdnoprev = abap_true. 
+ 
+*Make Form attachment of all three copies 
+    LOOP AT gt_cnt INTO gw_cnt. 
+ 
+      CLEAR lv_cnt. 
+      lv_cnt = sy-tabix . 
+ 
+      CLEAR ls_return. 
+      CALL FUNCTION fm_name 
+        EXPORTING 
+          control_parameters = ls_ctrlop 
+          output_options     = ls_outopt 
+          user_settings      = abap_true 
+          v_belnr            = ls_belnr-belnr 
+          v_gjahr            = p_gjahr 
+          w_rseg             = w_rseg 
+          w_rbkp             = w_rbkp 
+          w_ekko             = w_ekko 
+          w_j_1imocomp       = w_j_1imocomp 
+          w_mkpf             = w_mkpf 
+          w_j_1imovend       = w_j_1imovend 
+          w_lfa1             = w_lfa1 
+          lv_c               = lv_cnt 
+          lv_flag            = ' ' 
+        IMPORTING 
+          job_output_info    = ls_return 
+        TABLES 
+          it_final           = it_final 
+        EXCEPTIONS 
+          formatting_error   = 1 
+          internal_error     = 2 
+          send_error         = 3 
+          user_canceled      = 4 
+          OTHERS             = 5. 
+      IF sy-subrc <> 0. 
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno 
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4. 
+      ELSE. 
+ 
+*Convert Form into OTF format 
+        CLEAR:lt_record,lv_binfile_size,lt_pdf_data. 
+        PERFORM convert_form_into_otf_format USING ls_return 
+                                                                   CHANGING lt_record 
+                                                                                    lv_binfile_size 
+                                                                                    lt_pdf_data. 
+ 
+        CLEAR:lv_bin_file_size_temp,lv_filename. 
+        lv_bin_file_size_temp = lv_binfile_size. 
+        lv_filename = gv_path. 
+ 
+        SPLIT lv_filename AT '.' INTO DATA(lv_filepath) DATA(lv_file_extension). 
+        CLEAR lv_filename. 
+ 
+        IF lv_cnt EQ '1'. 
+          CONCATENATE lv_filepath '_' ls_belnr-fi_doc_no '_' TEXT-012 '.' lv_file_extension INTO lv_filename. 
+        ELSEIF lv_cnt EQ '2'. 
+          CONCATENATE lv_filepath '_' ls_belnr-fi_doc_no '_' TEXT-013 '.' lv_file_extension INTO lv_filename. 
+        ELSEIF lv_cnt EQ '3'. 
+          CONCATENATE lv_filepath '_'  ls_belnr-fi_doc_no '_' TEXT-014 '.' lv_file_extension INTO lv_filename. 
+        ENDIF. 
+ 
+ 
+        CALL FUNCTION 'GUI_DOWNLOAD' 
+          EXPORTING 
+            bin_filesize            = lv_bin_file_size_temp 
+            filename                = lv_filename 
+            filetype                = 'BIN' 
+          IMPORTING 
+            filelength              = lv_file_size 
+          TABLES 
+            data_tab                = lt_pdf_data 
+          EXCEPTIONS 
+            file_write_error        = 1 
+            no_batch                = 2 
+            gui_refuse_filetransfer = 3 
+            invalid_type            = 4 
+            no_authority            = 5 
+            unknown_error           = 6 
+            header_not_allowed      = 7 
+            separator_not_allowed   = 8 
+            filesize_not_allowed    = 9 
+            header_too_long         = 10 
+            dp_error_create         = 11 
+            dp_error_send           = 12 
+            dp_error_write          = 13 
+            unknown_dp_error        = 14 
+            access_denied           = 15 
+            dp_out_of_memory        = 16 
+            disk_full               = 17 
+            dp_timeout              = 18 
+            file_not_found          = 19 
+            dataprovider_exception  = 20 
+            control_flush_error     = 21 
+            OTHERS                  = 22. 
+        IF sy-subrc <> 0. 
+ 
+          IF lv_cnt EQ '1'. 
+            WRITE:/5 'Debit Note Original Copy not downloaded:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ELSEIF lv_cnt EQ '2'. 
+            WRITE:/5 'Debit Note Duplicate Copy not downloaded:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ELSEIF lv_cnt EQ '3'. 
+            WRITE:/5 'Debit Note Triplicate Copy not downloaded:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ENDIF. 
+ 
+        ELSE. 
+ 
+          IF lv_cnt EQ '1'. 
+            WRITE:/5 'Debit Note Original Copy successfully downloaded for Accounting document no.:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ELSEIF lv_cnt EQ '2'. 
+            WRITE:/5 'Debit Note Duplicate Copy successfully downloaded for Accounting document no.:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ELSEIF lv_cnt EQ '3'. 
+            WRITE:/5 'Debit Note Triplicate Copy successfully downloaded for Accounting document no.:', 85 sy-vline, 87 ls_belnr-fi_doc_no. 
+          ENDIF. 
+ 
+        ENDIF. 
+      ENDIF. 
+ 
+    ENDLOOP. 
+ 
+    WRITE:/ sy-uline. 
+ 
+  *----------------------------------------------------------------------* 
+*&---------------------------------------------------------------------* 
+*&      Form  CONVERT_FORM_INTO_OTF_FORMAT 
+*&---------------------------------------------------------------------* 
+*       text 
+*----------------------------------------------------------------------* 
+*      -->P_LS_RETURN  text 
+*      <--P_LT_RECORD  text 
+*----------------------------------------------------------------------* 
+FORM convert_form_into_otf_format  USING is_return TYPE ssfcrescl 
+                                    CHANGING ct_record TYPE srm_t_solisti1 
+                                                      cv_binfile_size TYPE sood-objlen 
+                                                      ct_tline TYPE tttext. 
+ 
+  DATA:lv_len_in LIKE sood-objlen, 
+       lv_buffer TYPE string. 
+ 
+  DATA: 
+    lt_otf   TYPE STANDARD TABLE OF itcoo, 
+    lt_tline TYPE STANDARD TABLE OF tline. 
+ 
+  CLEAR:lt_otf,lt_tline,lv_len_in. 
+  lt_otf[] = is_return-otfdata[]. 
+ 
+  CALL FUNCTION 'CONVERT_OTF' 
+    EXPORTING 
+      format                = 'PDF' 
+      max_linewidth         = 132 
+    IMPORTING 
+      bin_filesize          = lv_len_in 
+    TABLES 
+      otf                   = lt_otf 
+      lines                 = lt_tline 
+    EXCEPTIONS 
+      err_max_linewidth     = 1 
+      err_format            = 2 
+      err_conv_not_possible = 3 
+      OTHERS                = 4. 
+  IF sy-subrc <> 0. 
+ 
+  ELSE. 
+ 
+    IF p_email EQ abap_true. 
+ 
+      CLEAR lv_buffer. 
+      LOOP AT lt_tline ASSIGNING FIELD-SYMBOL(<lfs_tline>). 
+        TRANSLATE <lfs_tline> USING '~'. 
+        CONCATENATE lv_buffer <lfs_tline> INTO lv_buffer. 
+      ENDLOOP. 
+      TRANSLATE lv_buffer USING '~'. 
+ 
+      CLEAR ct_record. 
+      DO. 
+        APPEND INITIAL LINE TO ct_record ASSIGNING FIELD-SYMBOL(<lfs_record>). 
+        IF <lfs_record> IS ASSIGNED. 
+          <lfs_record> = lv_buffer. 
+        ENDIF. 
+ 
+        SHIFT lv_buffer LEFT BY 255 PLACES. 
+        IF lv_buffer IS INITIAL. 
+          EXIT. 
+        ENDIF. 
+      ENDDO. 
+ 
+    ELSEIF p_downld EQ abap_true. 
+      cv_binfile_size = lv_len_in. 
+      ct_tline = lt_tline. 
+    ENDIF. 
+ 
+  ENDIF. 
+ 
+ENDFORM.		 
