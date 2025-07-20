@@ -1,0 +1,1908 @@
+Attachment handling in Document Management Server(CV01) through OData service
+
+class ZCL_ZODATA_JOR_ESTIMATE_BO definition
+  public
+  final
+  create public .
+
+public section.
+
+  methods GET_BOMCOMPONENTS
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID optional
+      !IV_MATERIAL_CATEGORY type ZCHARACT optional
+      !IV_MATERIAL_NO type MATNR18 optional
+      !IT_PROJECT_ID type /IWBEP/T_COD_SELECT_OPTIONS optional
+      !IT_MATERIAL_CATEGORY type /IWBEP/T_COD_SELECT_OPTIONS optional
+      !IT_MATERIAL_NO type /IWBEP/T_COD_SELECT_OPTIONS optional
+      !IT_SELECTED_MATNR type /IWBEP/T_COD_SELECT_OPTIONS
+      !IT_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+    exporting
+      !ET_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods CHECK_ATTACHMENT_EXISTENCE
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IV_MATERIAL_NO type MATNR18
+    changing
+      !CT_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS .
+  methods GET_ATTACHMENT
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IV_COMPONENT_ID type IDNRK
+    exporting
+      !ES_STREAM type /IWBEP/IF_MGW_CORE_TYPES=>TY_S_MEDIA_RESOURCE
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods DELETE_ATTACHMENT
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IV_COMPONENT_ID type IDNRK
+    exporting
+      !EV_SUCCESS type BOOLEAN
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods CREATE_ATTACHMENT
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_COMPONENT_ID type IDNRK
+      !IS_MEDIA_RESOURCE type /IWBEP/IF_MGW_APPL_TYPES=>TY_S_MEDIA_RESOURCE
+      !IV_FILENAME type LOCALFILE
+    exporting
+      !EV_SUCCESS type BOOLEAN
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods UPDATE_PRICE
+    importing
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IT_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods SAVE_PRICE
+    importing
+      !IT_BOM_COMPONENTS type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+      !IV_PROJECT_ID type ZRPM_EXTID
+    exporting
+      !EV_SUCCESS type BOOLEAN
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods EXECUTE_BDC_SESSION
+    exporting
+      !EV_QID type APQ_QUID .
+  methods GET_JUSTIFIED_RATES
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IT_MATERIAL_NO type /IWBEP/T_COD_SELECT_OPTIONS
+    exporting
+      !ET_JUSTIFIEDRATES type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_JUSTIFIEDRATES .
+  methods GET_COMPARISON_RATES_HEADER
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+      !IT_MATERIAL_NO type /IWBEP/T_COD_SELECT_OPTIONS
+    exporting
+      !ET_COMPARISONRATES_HEADER type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESHDR .
+  methods GET_COMPARISON_RATES_DETAIL
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_NO type MATNR
+    exporting
+      !ET_COMPARISONRATES_DETAIL type ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESDTL
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods GET_JUSTIFICATION_STATEMENT
+    importing
+      !IV_PROJECT_ID type ZRPM_EXTID
+      !IV_MATERIAL_CATEGORY type ZCHARACT
+    exporting
+      !ES_STREAM type /IWBEP/IF_MGW_CORE_TYPES=>TY_S_MEDIA_RESOURCE
+    raising
+      ZCX_JOR_EXCEPTION .
+  methods GET_MATERIAL_DESCRIPTION
+    importing
+      !IV_MATERIAL_NO type CHAR18
+      !IV_PROJECT_ID type ZRPM_EXTID
+    returning
+      value(RV_MATERIAL_LONG_TEXT) type CHAR1024 .
+protected section.
+private section.
+ENDCLASS.
+
+
+
+CLASS ZCL_ZODATA_JOR_ESTIMATE_BO IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->CHECK_ATTACHMENT_EXISTENCE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IV_MATERIAL_NO                 TYPE        MATNR18
+* | [<-->] CT_BOM_COMPONENTS              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD check_attachment_existence.
+
+    TYPES:BEGIN OF ty_attachment,
+            componentid TYPE idnrk,
+            filename    TYPE doknr,
+          END OF ty_attachment.
+
+    DATA:lt_attachment TYPE STANDARD TABLE OF ty_attachment,
+         lv_mat_tmp    TYPE matnr.
+
+    CONSTANTS:lc_de  TYPE char2 VALUE 'TS',
+              lc_00  TYPE char2 VALUE '00',
+              lc_000 TYPE char3 VALUE '000'.
+
+    IF iv_project_id IS NOT INITIAL        AND
+       iv_material_category IS NOT INITIAL AND
+       iv_material_no IS NOT INITIAL.
+
+*Prepare filename
+      LOOP AT ct_bom_components ASSIGNING FIELD-SYMBOL(<lfs_bom_component>) WHERE componentid IS NOT INITIAL.
+
+        CLEAR lv_mat_tmp.
+        CALL FUNCTION 'CONVERSION_EXIT_MATN1_OUTPUT'
+          EXPORTING
+            input  = <lfs_bom_component>-componentid
+          IMPORTING
+            output = lv_mat_tmp.
+
+        APPEND INITIAL LINE TO lt_attachment ASSIGNING FIELD-SYMBOL(<lfs_attachment>).
+        IF <lfs_attachment> IS ASSIGNED.
+          <lfs_attachment>-componentid = <lfs_bom_component>-componentid.
+          <lfs_attachment>-filename    = lc_de && '_' && iv_project_id && '_' && lv_mat_tmp.
+        ENDIF.
+
+      ENDLOOP.
+
+*Check if attachment exists in DMS
+      IF lt_attachment IS NOT INITIAL.
+
+        SELECT dokvr,
+               doktl,
+               dokar,
+               doknr
+        FROM draw
+        INTO TABLE @DATA(lt_documents)
+        FOR ALL ENTRIES IN @lt_attachment
+        WHERE dokvr = @lc_00  AND
+              doktl = @lc_000 AND
+              dokar = @lc_de  AND
+              doknr EQ @lt_attachment-filename.
+        IF sy-subrc EQ 0.
+          SORT lt_documents BY dokar doknr dokvr doktl.
+        ENDIF.
+
+*Map file existence
+        LOOP AT lt_documents ASSIGNING FIELD-SYMBOL(<lfs_document>).
+          IF line_exists( lt_attachment[ filename = <lfs_document>-doknr ] ).
+            DATA(lv_componentid) = lt_attachment[ filename = <lfs_document>-doknr ]-componentid.
+            READ TABLE ct_bom_components ASSIGNING <lfs_bom_component> WITH KEY componentid = lv_componentid.
+            IF sy-subrc EQ 0.
+              <lfs_bom_component>-fileexits = abap_true.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->CREATE_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_COMPONENT_ID                TYPE        IDNRK
+* | [--->] IS_MEDIA_RESOURCE              TYPE        /IWBEP/IF_MGW_APPL_TYPES=>TY_S_MEDIA_RESOURCE
+* | [--->] IV_FILENAME                    TYPE        LOCALFILE
+* | [<---] EV_SUCCESS                     TYPE        BOOLEAN
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD create_attachment.
+
+    TYPES: BEGIN OF ty_raw_line,
+             line(2550) TYPE x,
+           END OF ty_raw_line.
+
+    DATA:lv_mat_tmp    TYPE matnr,
+         lv_docnum     TYPE doknr,
+         lv_filename   TYPE localfile,
+         lv_extension  TYPE char5,
+         lv_dms_server TYPE char10,
+         ls_return     TYPE bapiret2,
+         lv_binlen     TYPE i,
+         lv_dappl      TYPE dappl.
+
+    DATA:lt_doc_descr  TYPE STANDARD TABLE OF bapi_doc_drat,
+         lt_bintab     TYPE TABLE OF ty_raw_line,
+         lt_drao       TYPE TABLE OF drao,
+         ls_status     TYPE cvapi_doc_status,
+         lt_org_of_doc TYPE TABLE OF cvapi_doc_file,
+         ls_api_cntl   TYPE cvapi_api_control,
+         ls_msg        TYPE messages.
+
+    CONSTANTS:lc_de  TYPE char3 VALUE 'TS',
+              lc_00  TYPE char2 VALUE '00',
+              lc_000 TYPE char3 VALUE '000'.
+
+    CLEAR ev_success.
+
+*Prepare filename
+    CLEAR lv_mat_tmp.
+    CALL FUNCTION 'CONVERSION_EXIT_MATN1_OUTPUT'
+      EXPORTING
+        input  = iv_component_id
+      IMPORTING
+        output = lv_mat_tmp.
+
+    lv_docnum = lc_de && '_' && iv_project_id && '_' && lv_mat_tmp.
+
+*Check if attachment exists in DMS
+    SELECT SINGLE @abap_true
+    FROM draw
+    INTO @DATA(lv_file_exists)
+    WHERE dokvr = @lc_00  AND
+          doktl = @lc_000 AND
+          dokar = @lc_de AND
+          doknr = @lv_docnum.
+    IF lv_file_exists EQ abap_false.
+
+      lv_filename = iv_filename.
+      CALL FUNCTION 'TRINT_FILE_GET_EXTENSION'  " FM for getting File extension.
+        EXPORTING
+          filename  = lv_filename
+          uppercase = abap_true
+        IMPORTING
+          extension = lv_extension.
+
+      TRANSLATE lv_extension TO UPPER CASE.
+      IF lv_extension EQ 'PDF'  OR
+         lv_extension EQ 'XLS'  OR
+         lv_extension EQ 'XLSX' OR
+         lv_extension EQ 'TXT'  OR
+         lv_extension EQ 'PNG'  OR
+         lv_extension EQ 'JPG'  OR
+         lv_extension EQ 'JPEG' OR
+         lv_extension EQ 'DOCX'.
+
+        lv_dms_server = COND #( WHEN sy-sysid EQ 'DS4' THEN 'ZSD_DMS'
+                                WHEN sy-sysid EQ 'US4' THEN 'ZSD_DMSQ'
+                                WHEN sy-sysid EQ 'TS4' THEN 'ZSD_DMSQ'
+                                WHEN sy-sysid EQ 'QS4' THEN 'ZSD_DMSQ'
+                                WHEN sy-sysid EQ 'PS4' THEN 'ZSD_DMSP' ).
+
+        DATA(ls_documentdata) = VALUE bapi_doc_draw2( documenttype    = lc_de
+                                                      documentnumber  = lv_docnum
+                                                      documentversion = lc_00
+                                                      documentpart    = lc_000
+                                                      description     = 'DAR PRICE UPDATE'
+                                                      statuslog       = 'DOE' ).
+
+        IF lv_extension EQ 'PDF'.
+          lv_dappl = 'PDF'.
+          ls_documentdata-wsapplication1 = 'PDF'.
+        ELSEIF lv_extension EQ 'TXT'.
+          lv_dappl = 'TXT'.
+          ls_documentdata-wsapplication1 = 'TXT'.
+        ELSEIF lv_extension EQ 'XLS'  OR
+               lv_extension EQ 'XLSX'.
+          lv_dappl = 'XLSX'.
+          ls_documentdata-wsapplication1 = 'XLS'.
+        ELSEIF lv_extension EQ 'JPG'  OR
+               lv_extension EQ 'JPEG' OR
+               lv_extension EQ 'PNG'.
+          lv_dappl = 'LIM'.
+          ls_documentdata-wsapplication1 = 'LIM'.
+        ELSEIF lv_extension EQ 'DOCX'.
+          lv_dappl = 'DOCX'.
+          ls_documentdata-wsapplication1 = 'DOCX'.
+        ENDIF.
+
+*Upload file in DMS
+        CALL FUNCTION 'BAPI_DOCUMENT_CREATE2'
+          EXPORTING
+            documentdata         = ls_documentdata
+            pf_ftp_dest          = 'SAPFTPA'
+            pf_http_dest         = 'SAPHTTPA'
+          IMPORTING
+            return               = ls_return
+          TABLES
+            documentdescriptions = lt_doc_descr.
+
+        IF ls_return-type = 'E'.
+          CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO DATA(lv_message) ##NEEDED.
+          RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+        ELSE.
+          CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+            EXPORTING
+              wait = abap_true.
+
+*Get file content
+          CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+            EXPORTING
+              buffer        = is_media_resource-value
+            IMPORTING
+              output_length = lv_binlen
+            TABLES
+              binary_tab    = lt_bintab.
+
+          lt_drao = VALUE #( FOR ls_bintab IN lt_bintab
+                           ( dokar = lc_de
+                             doknr = lv_docnum
+                             dokvr = lc_00
+                             doktl = lc_000
+                             appnr = '1'
+                             zaehl = 1
+                             orblk = ls_bintab-line
+                             orln  = lv_binlen ) ).
+
+          SPLIT lv_filename AT '.' INTO DATA(lv_file_name) DATA(lv_file_type) ##NEEDED.
+          lt_org_of_doc = VALUE #( ( appnr       = '1'
+                                     updateflag  = 'I'
+                                     dappl       = lv_dappl
+                                     storage_cat = lv_dms_server
+                                     filename    = lv_file_name
+                                     description = lv_file_name
+                                     checked_in  = abap_true ) ).
+
+          ls_api_cntl-no_update_task = abap_true.
+          ls_status-dokst = ''.
+
+*Upload file content in DMS
+          CLEAR ls_msg.
+          CALL FUNCTION 'CVAPI_DOC_CHECKIN'
+            EXPORTING
+              pf_dokar           = lc_de
+              pf_doknr           = lv_docnum
+              pf_dokvr           = lc_00
+              pf_doktl           = lc_000
+              pf_hostname        = 'DEFAULT'
+              ps_api_control     = ls_api_cntl
+              ps_doc_status      = ls_status
+              pf_replace         = 'X'
+              pf_content_provide = 'TBL'
+              pf_ftp_dest        = 'SAPFTPA'
+              pf_http_dest       = 'SAPHTTPA'
+            IMPORTING
+              psx_message        = ls_msg
+            TABLES
+              pt_files_x         = lt_org_of_doc
+              pt_content         = lt_drao.
+
+          IF ls_msg-msg_type CA 'EA'.
+            CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+            MESSAGE e016(zjor) INTO lv_message.
+            RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+          ELSE.
+            CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+              EXPORTING
+                wait = abap_true.
+            ev_success = abap_true.
+          ENDIF.
+
+        ENDIF.
+      ELSE.
+        MESSAGE e017(zjor) WITH lv_extension INTO lv_message.
+        RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+      ENDIF.
+    ELSE.
+      MESSAGE e006(zjor) INTO lv_message.
+      RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->DELETE_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IV_COMPONENT_ID                TYPE        IDNRK
+* | [<---] EV_SUCCESS                     TYPE        BOOLEAN
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD delete_attachment.
+
+    DATA:lv_mat_tmp TYPE matnr,
+         lv_doctype TYPE dokar,
+         lv_docnum  TYPE doknr,
+         lv_docpart TYPE doktl_d,
+         lv_docver  TYPE dokvr,
+         ls_return  TYPE bapiret2.
+
+    CONSTANTS:lc_de  TYPE char2 VALUE 'TS',
+              lc_00  TYPE char2 VALUE '00',
+              lc_000 TYPE char3 VALUE '000'.
+
+    CLEAR ev_success.
+
+*Prepare filename
+    CLEAR lv_mat_tmp.
+    CALL FUNCTION 'CONVERSION_EXIT_MATN1_OUTPUT'
+      EXPORTING
+        input  = iv_component_id
+      IMPORTING
+        output = lv_mat_tmp.
+
+    lv_docnum = lc_de && '_' && iv_project_id && '_' && lv_mat_tmp.
+
+*Check if attachment exists in DMS
+    SELECT SINGLE @abap_true
+    FROM draw
+    INTO @DATA(lv_file_exists)
+    WHERE dokvr = @lc_00  AND
+          doktl = @lc_000 AND
+          dokar = @lc_de AND
+          doknr = @lv_docnum.
+    IF lv_file_exists EQ abap_true.
+
+      lv_doctype = lc_de.
+      lv_docpart = lc_000.
+      lv_docver  = lc_00.
+
+      CALL FUNCTION 'BAPI_DOCUMENT_DELETE_DIRECT'
+        EXPORTING
+          documenttype    = lv_doctype
+          documentnumber  = lv_docnum
+          documentpart    = lv_docpart
+          documentversion = lv_docver
+        IMPORTING
+          return          = ls_return.
+      IF ls_return-type EQ 'E'.
+        MESSAGE ID ls_return-id TYPE ls_return-type NUMBER ls_return-number
+        WITH ls_return-message_v1 ls_return-message_v2 ls_return-message_v3 ls_return-message_v4 INTO DATA(lv_message) ##NEEDED.
+        RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+      ELSE.
+        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+          EXPORTING
+            wait = abap_true.
+
+        ev_success = abap_true.
+      ENDIF.
+    ELSE.
+      MESSAGE e004(zjor) INTO lv_message.
+      RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->EXECUTE_BDC_SESSION
+* +-------------------------------------------------------------------------------------------------+
+* | [<---] EV_QID                         TYPE        APQ_QUID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD execute_bdc_session.
+
+*    DATA:lv_qid TYPE apq_quid.
+*
+*    DATA:lv_jobname TYPE tbtco-jobname,
+*         lv_jobnumb TYPE rsjobinfo-jobnumb.
+*
+*    CLEAR ev_qid.
+*
+*    IMPORT lv_qid TO lv_qid FROM MEMORY ID 'ZJOR_QID'.
+*
+*    IF lv_qid IS NOT INITIAL.
+*
+*      ev_qid = lv_qid.
+*
+*      SELECT SINGLE *
+*      FROM apqi
+*      INTO @DATA(ls_session)
+*      WHERE qid = @lv_qid.
+*      IF sy-subrc EQ 0.
+*
+*        CALL FUNCTION 'ENQUEUE_BDC_QID'
+*          EXPORTING
+*            datatyp        = ls_session-datatyp
+*            groupid        = ls_session-groupid
+*            qid            = ls_session-qid
+*          EXCEPTIONS
+*            foreign_lock   = 1
+*            system_failure = 99.
+*
+*        lv_jobname = ls_session-groupid.
+*        CALL FUNCTION 'JOB_OPEN'
+*          EXPORTING
+*            jobgroup         = 'BATCH-INPUT'
+*            jobname          = lv_jobname
+*            sdlstrtdt        = sy-datum
+*            sdlstrttm        = sy-uzeit
+*          IMPORTING
+*            jobcount         = lv_jobnumb
+*          EXCEPTIONS
+*            cant_create_job  = 1
+*            invalid_job_data = 2
+*            jobname_missing  = 3
+*            OTHERS           = 99.
+*
+*        SUBMIT rsbdcbtc
+*        TO SAP-SPOOL
+*        DESTINATION   space
+*        IMMEDIATELY   space
+*        KEEP IN SPOOL space
+*        WITHOUT SPOOL DYNPRO
+*        USER ls_session-userid
+*        VIA JOB       lv_jobname
+*        NUMBER        lv_jobnumb
+*        WITH queue_id EQ ls_session-qid
+*        WITH mappe    EQ lv_jobname
+*        WITH modus    EQ 'N'
+*        WITH logall   EQ 'X' AND RETURN.
+*        IF sy-subrc = 0.
+*
+*          CALL FUNCTION 'JOB_CLOSE'
+*            EXPORTING
+*              jobcount             = lv_jobnumb
+*              jobname              = lv_jobname
+*              strtimmed            = 'X'
+*              targetsystem         = ''
+*            EXCEPTIONS
+*              cant_start_immediate = 1
+*              invalid_startdate    = 2
+*              jobname_missing      = 3
+*              job_close_failed     = 4
+*              job_nosteps          = 5
+*              job_notex            = 6
+*              lock_failed          = 7
+*              OTHERS               = 99.
+*          IF sy-subrc = 0.
+*
+*            UPDATE apqi SET qstate  = 'S'
+*            WHERE destsys = ls_session-destsys AND
+*                  destapp = ls_session-destapp AND
+*                  datatyp = ls_session-datatyp AND
+*                  groupid = ls_session-groupid AND
+*                  progid  = ls_session-progid  AND
+*                  formid  = ls_session-formid  AND
+*                  qattrib = ls_session-qattrib AND
+*                  qid     = ls_session-qid.
+*
+*            COMMIT WORK.
+*
+*            CALL FUNCTION 'DEQUEUE_BDC_QID'
+*              EXPORTING
+*                datatyp = ls_session-datatyp
+*                groupid = ls_session-groupid
+*                qid     = ls_session-qid.
+*
+*          ELSE.
+*            CALL FUNCTION 'BP_JOB_DELETE'
+*              EXPORTING
+*                jobname    = lv_jobname
+*                jobcount   = lv_jobnumb
+*                forcedmode = 'X'
+*              EXCEPTIONS
+*                OTHERS     = 99.
+*          ENDIF.
+*
+*          CALL FUNCTION 'BP_JOB_DELETE'
+*            EXPORTING
+*              jobname    = lv_jobname
+*              jobcount   = lv_jobnumb
+*              forcedmode = 'X'
+*            EXCEPTIONS
+*              OTHERS     = 99.
+*        ENDIF.
+*
+*      ENDIF.
+*    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_ATTACHMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IV_COMPONENT_ID                TYPE        IDNRK
+* | [<---] ES_STREAM                      TYPE        /IWBEP/IF_MGW_CORE_TYPES=>TY_S_MEDIA_RESOURCE
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_attachment.
+
+    DATA:lv_mat_tmp  TYPE matnr,
+         lv_filename TYPE doknr.
+
+    CONSTANTS:lc_de  TYPE char2 VALUE 'TS',
+              lc_00  TYPE char2 VALUE '00',
+              lc_000 TYPE char3 VALUE '000'.
+
+    IF iv_project_id IS NOT INITIAL        AND
+       iv_material_category IS NOT INITIAL AND
+       iv_component_id IS NOT INITIAL.
+
+*Prepare filename
+      CLEAR lv_mat_tmp.
+      CALL FUNCTION 'CONVERSION_EXIT_MATN1_OUTPUT'
+        EXPORTING
+          input  = iv_component_id
+        IMPORTING
+          output = lv_mat_tmp.
+
+      lv_filename = lc_de && '_' && iv_project_id && '_' && lv_mat_tmp.
+
+*Check if attachment exists in DMS
+      IF lv_filename IS NOT INITIAL.
+
+        SELECT SINGLE dokvr,
+                      doktl,
+                      dokar,
+                      doknr
+        FROM draw
+        INTO @DATA(ls_document)
+        WHERE dokvr EQ @lc_00  AND
+              doktl EQ @lc_000 AND
+              dokar EQ @lc_de  AND
+              doknr EQ @lv_filename.
+        IF sy-subrc EQ 0.
+
+          CALL FUNCTION 'ZDMS_READ_FILE_XTRING'
+            EXPORTING
+              ip_doknr    = ls_document-doknr
+            IMPORTING
+              ep_xstring  = es_stream-value
+              ep_mimetype = es_stream-mime_type
+            EXCEPTIONS
+              zexception  = 1
+              OTHERS      = 2.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+          ENDIF.
+
+        ELSE.
+          MESSAGE e005(zjor) INTO DATA(lv_message) ##NEEDED.
+          RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_BOMCOMPONENTS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID(optional)
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT(optional)
+* | [--->] IV_MATERIAL_NO                 TYPE        MATNR18(optional)
+* | [--->] IT_PROJECT_ID                  TYPE        /IWBEP/T_COD_SELECT_OPTIONS(optional)
+* | [--->] IT_MATERIAL_CATEGORY           TYPE        /IWBEP/T_COD_SELECT_OPTIONS(optional)
+* | [--->] IT_MATERIAL_NO                 TYPE        /IWBEP/T_COD_SELECT_OPTIONS(optional)
+* | [--->] IT_SELECTED_MATNR              TYPE        /IWBEP/T_COD_SELECT_OPTIONS
+* | [--->] IT_BOM_COMPONENTS              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* | [<---] ET_BOM_COMPONENTS              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_bomcomponents.
+
+    DATA:lv_matnr    TYPE mara-matnr,
+         lv_name     TYPE thead-tdname,
+         lv_ext_unit TYPE mseh3.
+
+    DATA:lt_stpo  TYPE STANDARD TABLE OF stpox,
+         lt_lines TYPE TABLE OF tline.
+
+*    IF iv_project_id        IS NOT INITIAL AND
+*       iv_material_category IS NOT INITIAL AND
+*       iv_material_no       IS NOT INITIAL.
+
+    DATA(lv_project_id)  = iv_project_id.
+    DATA(lv_mat_cat)     = iv_material_category.
+    DATA(lv_material_no) = iv_material_no.
+*    ELSE.
+*      IF it_project_id        IS NOT INITIAL AND
+*         it_material_category IS NOT INITIAL AND
+*         it_material_no       IS NOT INITIAL.
+*
+*        lv_project_id  = it_project_id[ 1 ]-low.
+*        lv_mat_cat     = it_material_category[ 1 ]-low.
+*        lv_material_no = it_material_no[ 1 ]-low.
+*      ENDIF.
+*    ENDIF.
+
+    IF lv_project_id  IS NOT INITIAL AND
+       lv_mat_cat     IS NOT INITIAL AND
+       lv_material_no IS NOT INITIAL.
+
+      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+        EXPORTING
+          input        = lv_material_no
+        IMPORTING
+          output       = lv_matnr
+        EXCEPTIONS
+          length_error = 1
+          OTHERS       = 2.
+      IF sy-subrc <> 0.
+* Implement suitable error handling here
+      ELSE.
+
+*Get BOM components of the estimate material
+        CALL FUNCTION 'CS_BOM_EXPL_MAT_V2'
+          EXPORTING
+            capid                 = 'PI01'
+            datuv                 = sy-datum
+            emeng                 = 1
+            mehrs                 = 'X'
+            mtnrv                 = lv_matnr
+            stlal                 = '01'
+            stlan                 = '1'
+            stpst                 = 0
+            svwvo                 = 'X'
+            werks                 = 'EE01'
+          TABLES
+            stb                   = lt_stpo
+          EXCEPTIONS
+            alt_not_found         = 1
+            call_invalid          = 2
+            material_not_found    = 3
+            missing_authorization = 4
+            no_bom_found          = 5
+            no_plant_data         = 6
+            no_suitable_bom_found = 7
+            conversion_error      = 8
+            OTHERS                = 9.
+        IF sy-subrc <> 0.
+
+          IF it_selected_matnr IS NOT INITIAL.
+            IF lines( it_selected_matnr ) EQ 1.
+              IF lt_stpo IS INITIAL.
+                MESSAGE e013(zjor) INTO DATA(lv_message) ##NEEDED.
+                RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+              ENDIF.
+            ELSE.
+              IF lv_material_no EQ it_selected_matnr[ lines( it_selected_matnr ) ]-low.
+                IF lt_stpo IS INITIAL AND
+                   it_bom_components IS INITIAL.
+                  MESSAGE e013(zjor) INTO lv_message.
+                  RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+          IF it_selected_matnr IS INITIAL.
+            MESSAGE e013(zjor) INTO lv_message.
+            RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+*Validate components records
+      IF lt_stpo IS NOT INITIAL.
+        DELETE lt_stpo WHERE matmk EQ 'DSR'.
+        DELETE lt_stpo WHERE mtart NE 'ZEDR' AND
+                             mtart NE 'ZCDR' AND
+                             mtart NE 'ZHDR' AND
+                             mtart NE 'ZCVI' AND
+                             mtart NE 'ZEVI' AND
+                             mtart NE 'ZHVI'.
+
+        IF lt_stpo IS INITIAL.
+          MESSAGE e000(zjor) INTO DATA(lv_message_text) ##NEEDED.
+          RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+        ENDIF.
+
+        SORT lt_stpo BY idnrk.
+        DELETE ADJACENT DUPLICATES FROM lt_stpo COMPARING idnrk.
+
+*Get relevant data for component id
+        SELECT a~matnr,
+               a~mtart,
+               b~bwkey,
+               b~bwtar,
+               b~stprs,
+               b~peinh,
+               c~meinh,
+               d~maktx,
+               e~stprs AS marketrate,
+               e~remarks
+        INTO TABLE @DATA(lt_data)
+        FROM mara AS a LEFT OUTER JOIN mbew AS b ON b~matnr EQ a~matnr
+                       LEFT OUTER JOIN marm AS c ON c~matnr EQ a~matnr
+                       LEFT OUTER JOIN makt AS d ON d~matnr EQ a~matnr
+                       LEFT OUTER JOIN zdar_price_updat AS e ON e~idnrk EQ a~matnr AND
+                                                                e~pspnr EQ @lv_project_id
+        FOR ALL ENTRIES IN @lt_stpo
+        WHERE a~matnr EQ @lt_stpo-idnrk.
+        IF sy-subrc EQ 0.
+          SORT lt_data BY matnr.
+        ENDIF.
+
+*Check if material valuation found
+        IF line_exists( lt_data[ bwkey = space
+                                 bwtar = space ] ).
+          MESSAGE e001(zjor) INTO lv_message_text.
+          RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+        ENDIF.
+
+*Get material description.
+        SELECT SINGLE zmat_desc,
+                      zsys_rate
+        FROM zde_estimate1
+        INTO @DATA(ls_estimate)
+        WHERE zproj_id EQ @lv_project_id AND
+              mat_cat  EQ @lv_mat_cat AND
+              zmat_no  EQ @lv_material_no ##WARN_OK.
+        IF sy-subrc EQ 0.
+        ENDIF.
+
+*Map BOM components to output
+        LOOP AT lt_stpo ASSIGNING FIELD-SYMBOL(<lfs_stpo>).
+          APPEND INITIAL LINE TO et_bom_components ASSIGNING FIELD-SYMBOL(<lfs_bom_components>).
+          IF <lfs_bom_components> IS ASSIGNED.
+
+            IF line_exists( lt_data[ matnr = <lfs_stpo>-idnrk ] ).
+              DATA(ls_data) = lt_data[ matnr = <lfs_stpo>-idnrk ].
+            ENDIF.
+
+            <lfs_bom_components>-projectid        = iv_project_id.
+            <lfs_bom_components>-materialcategory = iv_material_category.
+            <lfs_bom_components>-material         = iv_material_no.
+            <lfs_bom_components>-componentid      = <lfs_stpo>-idnrk.
+            <lfs_bom_components>-marketrate       = ls_data-marketrate.
+            <lfs_bom_components>-remarks          = ls_data-remarks.
+
+            CONDENSE <lfs_bom_components>-marketrate.
+
+*Read material description
+            IF <lfs_stpo>-werks NE 'MARK'.
+              CLEAR lv_name.
+              lv_name = <lfs_stpo>-idnrk.
+
+              CLEAR lt_lines.
+              CALL FUNCTION 'READ_TEXT'
+                EXPORTING
+                  id                      = 'BEST'
+                  language                = sy-langu
+                  name                    = lv_name
+                  object                  = 'MATERIAL'
+                TABLES
+                  lines                   = lt_lines
+                EXCEPTIONS
+                  id                      = 1
+                  language                = 2
+                  name                    = 3
+                  not_found               = 4
+                  object                  = 5
+                  reference_check         = 6
+                  wrong_access_to_archive = 7
+                  OTHERS                  = 8.
+              IF sy-subrc NE 0.
+* Implement suitable error handling here
+              ELSE.
+                LOOP AT lt_lines ASSIGNING FIELD-SYMBOL(<lfs_lines>).
+                  CONCATENATE <lfs_bom_components>-materialdescription <lfs_lines>-tdline
+                  INTO <lfs_bom_components>-materialdescription SEPARATED BY space.
+                ENDLOOP.
+              ENDIF.
+            ELSE.
+              <lfs_bom_components>-materialdescription = ls_estimate-zmat_desc.
+            ENDIF.
+
+            IF <lfs_bom_components>-materialdescription IS INITIAL.
+              <lfs_bom_components>-materialdescription = ls_data-maktx.
+            ENDIF.
+
+*Read basic rate
+            IF <lfs_stpo>-werks NE 'MARK'.
+              <lfs_bom_components>-basicrate = ls_data-stprs.
+            ELSE.
+              <lfs_bom_components>-basicrate = ls_estimate-zsys_rate.
+            ENDIF.
+
+*Read Unit
+            CLEAR lv_ext_unit.
+            CALL FUNCTION 'CONVERSION_EXIT_CUNIT_OUTPUT'
+              EXPORTING
+                input          = ls_data-meinh
+                language       = sy-langu
+              IMPORTING
+                long_text      = <lfs_bom_components>-unit
+                output         = lv_ext_unit
+              EXCEPTIONS
+                unit_not_found = 1
+                OTHERS         = 2.
+            IF sy-subrc <> 0.
+* Implement suitable error handling here
+            ELSE.
+              IF <lfs_bom_components>-unit IS INITIAL.
+                <lfs_bom_components>-unit = lv_ext_unit.
+              ENDIF.
+            ENDIF.
+
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+*Check if attachment exists against BOM component
+      check_attachment_existence( EXPORTING iv_project_id        = iv_project_id
+                                            iv_material_category = iv_material_category
+                                            iv_material_no       = iv_material_no
+                                  CHANGING ct_bom_components     = et_bom_components ).
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_COMPARISON_RATES_DETAIL
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_NO                 TYPE        MATNR
+* | [<---] ET_COMPARISONRATES_DETAIL      TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESDTL
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_comparison_rates_detail.
+
+    TYPES: BEGIN OF ty_output,
+             kalnr    TYPE ckis-kalnr,
+             matnr    TYPE matnr,
+             desc     TYPE stpo-ltext,
+             unit     TYPE ckis-pmeht,
+             uom      TYPE t006a-msehl,
+             quantity TYPE ckis-menge,
+             rate     TYPE ckis-gpreis,
+             amount   TYPE ckis-wertn,
+             cost_ele TYPE ckis-kstar,
+             color    TYPE lvc_t_scol,
+           END OF ty_output.
+
+    DATA:lv_mon(2) TYPE n,
+         lv_sdate  TYPE sy-datlo,
+         lt_output TYPE STANDARD TABLE OF ty_output.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_no IS NOT INITIAL.
+
+      CLEAR lv_mon.
+      lv_mon = sy-datum+4(2).
+
+      IF lv_mon = '12'.
+        lv_mon = '01'.
+        sy-datum+0(4) = sy-datum+0(4) + 1.
+        sy-datum+4(2) = lv_mon.
+      ELSE.
+        lv_mon = lv_mon + 1.
+        sy-datum+4(2) = lv_mon.
+      ENDIF.
+
+      CALL FUNCTION 'HR_JP_MONTH_BEGIN_END_DATE'
+        EXPORTING
+          iv_date             = sy-datum
+        IMPORTING
+          ev_month_begin_date = lv_sdate.
+
+      IF lv_sdate IS NOT INITIAL.
+        SUBMIT zdar_report_2 WITH p_matnr  EQ iv_material_no
+                             WITH p_p_id   EQ iv_project_id
+                             WITH p_date   EQ lv_sdate
+                             WITH p_skpdsp EQ abap_true AND RETURN.
+
+        IMPORT gt_output TO lt_output FROM MEMORY ID 'ZJOR_COMPARISON_RATES'.
+        IF lt_output IS INITIAL.
+          MESSAGE e014(zjor) INTO DATA(ls_message) ##NEEDED.
+          RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+        ELSE.
+
+          LOOP AT lt_output ASSIGNING FIELD-SYMBOL(<lfs_output>).
+            APPEND INITIAL LINE TO et_comparisonrates_detail ASSIGNING FIELD-SYMBOL(<lfs_comparisonrates_detail>).
+            IF <lfs_comparisonrates_detail> IS ASSIGNED.
+              <lfs_comparisonrates_detail>-projectid            = iv_project_id.
+              <lfs_comparisonrates_detail>-costestimateno       = <lfs_output>-kalnr.
+              <lfs_comparisonrates_detail>-material             = <lfs_output>-matnr.
+              <lfs_comparisonrates_detail>-description          = <lfs_output>-desc.
+              <lfs_comparisonrates_detail>-unit                 = <lfs_output>-unit.
+              <lfs_comparisonrates_detail>-uom                  = <lfs_output>-uom.
+              <lfs_comparisonrates_detail>-quantity             = <lfs_output>-quantity.
+              <lfs_comparisonrates_detail>-pricecontrollingarea = <lfs_output>-rate.
+              <lfs_comparisonrates_detail>-valuecontrollingarea = <lfs_output>-amount.
+              <lfs_comparisonrates_detail>-costelement          = <lfs_output>-cost_ele.
+
+              IF <lfs_comparisonrates_detail>-costestimateno EQ '000000000000'.
+                CLEAR <lfs_comparisonrates_detail>-costestimateno.
+              ELSE.
+                CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+                  EXPORTING
+                    input  = <lfs_comparisonrates_detail>-costestimateno
+                  IMPORTING
+                    output = <lfs_comparisonrates_detail>-costestimateno.
+              ENDIF.
+
+            ENDIF.
+          ENDLOOP.
+
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_COMPARISON_RATES_HEADER
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IT_MATERIAL_NO                 TYPE        /IWBEP/T_COD_SELECT_OPTIONS
+* | [<---] ET_COMPARISONRATES_HEADER      TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_COMPARISONRATESHDR
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_comparison_rates_header.
+
+    DATA:lv_mon(2)            TYPE n,
+         lv_sdate             TYPE sy-datum,
+         lv_edate             TYPE sy-datum,
+         lv_kst001            TYPE keph-kst001,
+         lv_costing_variant   TYPE ck_klvar,
+         lv_valuation_variant TYPE ck_bwvar,
+         lv_material_no       TYPE char18.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_category IS NOT INITIAL AND
+       it_material_no IS NOT INITIAL.
+
+*Get start and end date
+      CLEAR lv_mon.
+      lv_mon = sy-datum+4(2).
+
+      IF lv_mon = '12'.
+        lv_mon = '01'.
+        sy-datum+0(4) = sy-datum+0(4) + 1.
+        sy-datum+4(2) = lv_mon.
+      ELSE.
+        lv_mon = lv_mon + 1.
+        sy-datum+4(2) = lv_mon.
+      ENDIF.
+
+      CALL FUNCTION 'HR_JP_MONTH_BEGIN_END_DATE'
+        EXPORTING
+          iv_date             = sy-datum
+        IMPORTING
+          ev_month_begin_date = lv_sdate
+          ev_month_end_date   = lv_edate.
+
+      LOOP AT it_material_no ASSIGNING FIELD-SYMBOL(<lfs_material_no>).
+
+*Select costing variant
+        CLEAR lv_costing_variant.
+        SELECT SINGLE klvar
+        FROM zmaterial_upl2
+        INTO lv_costing_variant
+        WHERE matnr EQ <lfs_material_no>-low ##WARN_OK.
+        IF sy-subrc NE 0.
+          IF iv_material_category = 'CDSR'.
+            lv_costing_variant = 'ZPC1'.
+          ELSEIF iv_material_category = 'EDSR'.
+            lv_costing_variant = 'ZEC1'.
+          ELSEIF iv_material_category = 'HDSR'.
+            lv_costing_variant = 'ZH1'.
+          ENDIF.
+        ENDIF.
+
+*Validate costing variant
+        IF lv_costing_variant IS NOT INITIAL.
+          SELECT SINGLE @abap_true
+          FROM zjor_klvar
+          WHERE klvar1 EQ @lv_costing_variant
+          INTO @DATA(lv_exists).
+          IF lv_exists EQ abap_false.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+
+*Select valuation variant
+        CLEAR lv_valuation_variant.
+        SELECT SINGLE bwvar
+        FROM zjor_klvar
+        INTO lv_valuation_variant
+        WHERE klvar1 EQ lv_costing_variant.
+        IF sy-subrc NE 0.
+          CONTINUE.
+        ENDIF.
+
+*Get costing size and unit
+        SELECT SINGLE klvar2
+        FROM zjor_klvar
+        INTO @DATA(lv_cosv)
+        WHERE klvar1 EQ @lv_costing_variant.
+        IF sy-subrc EQ 0.
+          DATA(lv_cost_variant) = lv_cosv.
+        ENDIF.
+
+*Get Product Costing - Header Data
+        IF lv_sdate IS NOT INITIAL AND
+           lv_edate IS NOT INITIAL AND
+           lv_valuation_variant IS NOT INITIAL.
+
+          SELECT *
+          FROM keko
+          INTO TABLE @DATA(lt_keko)
+          WHERE matnr = @<lfs_material_no>-low AND
+                kadky BETWEEN @lv_sdate AND @lv_edate AND
+                bwvar = @lv_valuation_variant.
+          IF sy-subrc EQ 0.
+            SORT lt_keko BY kalnr kadky DESCENDING.
+            DELETE ADJACENT DUPLICATES FROM lt_keko COMPARING kalnr.
+          ENDIF.
+
+        ENDIF.
+
+*Map product costing data
+        IF lt_keko IS NOT INITIAL.
+
+          DATA(ls_keko) = lt_keko[ 1 ].
+
+          SELECT SINGLE *
+          FROM keph INTO @DATA(ls_keph)
+          WHERE kalnr = @ls_keko-kalnr AND
+                kadky = @ls_keko-kadky AND
+                bwvar = @ls_keko-bwvar AND
+                kkzst = @space ##WARN_OK.
+          IF sy-subrc EQ 0.
+
+            CLEAR lv_kst001.
+            lv_kst001 = ls_keph-kst001 + ls_keph-kst002 + ls_keph-kst003 + ls_keph-kst004 + ls_keph-kst005 +
+                        ls_keph-kst006 + ls_keph-kst007 + ls_keph-kst008 + ls_keph-kst009 + ls_keph-kst010 +
+                        ls_keph-kst011 + ls_keph-kst012 + ls_keph-kst013 + ls_keph-kst014 + ls_keph-kst015 +
+                        ls_keph-kst016 + ls_keph-kst017 + ls_keph-kst018 + ls_keph-kst019 + ls_keph-kst020 +
+                        ls_keph-kst021 + ls_keph-kst022 + ls_keph-kst023 + ls_keph-kst024 + ls_keph-kst025 +
+                        ls_keph-kst026 + ls_keph-kst027 + ls_keph-kst028 + ls_keph-kst029 + ls_keph-kst030 +
+                        ls_keph-kst031 + ls_keph-kst032 + ls_keph-kst033 + ls_keph-kst034 + ls_keph-kst035 +
+                        ls_keph-kst036 + ls_keph-kst037 + ls_keph-kst038 + ls_keph-kst039 + ls_keph-kst040 +
+                        ls_keph-kst041 + ls_keph-kst042 + ls_keph-kst043 + ls_keph-kst044 + ls_keph-kst045 +
+                        ls_keph-kst046 + ls_keph-kst047 + ls_keph-kst048 + ls_keph-kst049 + ls_keph-kst050 +
+                        ls_keph-kst051 + ls_keph-kst052 + ls_keph-kst053 + ls_keph-kst054 + ls_keph-kst055 +
+                        ls_keph-kst056 + ls_keph-kst057 + ls_keph-kst058 + ls_keph-kst059 + ls_keph-kst060 +
+                        ls_keph-kst061 + ls_keph-kst062 + ls_keph-kst063 + ls_keph-kst064 + ls_keph-kst065 +
+                        ls_keph-kst066 + ls_keph-kst067 + ls_keph-kst068 + ls_keph-kst069 + ls_keph-kst070 +
+                        ls_keph-kst071 + ls_keph-kst072 + ls_keph-kst073 + ls_keph-kst074 + ls_keph-kst075 +
+                        ls_keph-kst076 + ls_keph-kst077 + ls_keph-kst078 + ls_keph-kst079 + ls_keph-kst080 +
+                        ls_keph-kst081 + ls_keph-kst082 + ls_keph-kst083 + ls_keph-kst084 + ls_keph-kst085 +
+                        ls_keph-kst086 + ls_keph-kst087 + ls_keph-kst088 + ls_keph-kst089 + ls_keph-kst090 +
+                        ls_keph-kst091 + ls_keph-kst092 + ls_keph-kst093 + ls_keph-kst094 + ls_keph-kst095 +
+                        ls_keph-kst096 + ls_keph-kst097 + ls_keph-kst098 + ls_keph-kst099 + ls_keph-kst100 +
+                        ls_keph-kst101 + ls_keph-kst102 + ls_keph-kst103 + ls_keph-kst104 + ls_keph-kst105 +
+                        ls_keph-kst106 + ls_keph-kst107 + ls_keph-kst108 + ls_keph-kst109 + ls_keph-kst110 +
+                        ls_keph-kst111 + ls_keph-kst112 + ls_keph-kst113 + ls_keph-kst114 + ls_keph-kst115 +
+                        ls_keph-kst116 + ls_keph-kst117 + ls_keph-kst118 + ls_keph-kst119 + ls_keph-kst120.
+
+            SELECT SINGLE zmat_no,
+                          mat_cat,
+                          zmat_desc,
+                          zquant,
+                          uom,
+                          zsys_rate,
+                          zamount
+            FROM zde_estimate1
+            INTO @DATA(ls_estimate)
+            WHERE zproj_id = @iv_project_id AND
+                  zmat_no = @<lfs_material_no>-low ##WARN_OK.
+            IF sy-subrc EQ 0.
+
+*Map comparison rates
+              APPEND INITIAL LINE TO et_comparisonrates_header ASSIGNING FIELD-SYMBOL(<lfs_comparisonrates>).
+              IF <lfs_comparisonrates> IS ASSIGNED.
+                <lfs_comparisonrates>-itemnumber     = <lfs_material_no>-low.
+                <lfs_comparisonrates>-description    = ls_estimate-zmat_desc.
+                <lfs_comparisonrates>-quantity       = ls_estimate-zquant.
+                <lfs_comparisonrates>-uom            = ls_estimate-uom.
+                <lfs_comparisonrates>-nitrate        = ls_estimate-zsys_rate.
+                <lfs_comparisonrates>-nitamount      = ls_estimate-zamount.
+
+                IF ls_keko-losgr EQ 0.
+                  <lfs_comparisonrates>-justifiedrate = lv_kst001.
+                ELSE.
+                  <lfs_comparisonrates>-justifiedrate = lv_kst001 / ls_keko-losgr.
+                ENDIF.
+
+                <lfs_comparisonrates>-justifiedamount = ( <lfs_comparisonrates>-justifiedrate * ls_estimate-zquant ).
+
+                SELECT SINGLE losgr,
+                              meins
+                FROM keko INTO @DATA(ls_prdcost_h)
+                WHERE matnr EQ @<lfs_material_no>-low AND
+                      kadky BETWEEN @lv_sdate AND @lv_edate AND
+                      klvar EQ @lv_cost_variant AND
+                      werks EQ 'EE01' ##WARN_OK.
+                IF sy-subrc EQ 0.
+                  <lfs_comparisonrates>-costingsize = ls_prdcost_h-losgr.
+                  <lfs_comparisonrates>-unit        = ls_prdcost_h-meins.
+                ENDIF.
+
+                CLEAR lv_material_no.
+                lv_material_no = <lfs_material_no>-low.
+                <lfs_comparisonrates>-materiallongtext = get_material_description( EXPORTING iv_project_id  = iv_project_id
+                                                                                             iv_material_no = lv_material_no ).
+              ENDIF.
+
+            ENDIF.
+          ENDIF.
+
+        ENDIF.
+
+        CLEAR:lv_exists,lt_keko,ls_keph,ls_estimate,ls_prdcost_h.
+      ENDLOOP.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_JUSTIFICATION_STATEMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [<---] ES_STREAM                      TYPE        /IWBEP/IF_MGW_CORE_TYPES=>TY_S_MEDIA_RESOURCE
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_justification_statement.
+
+    CLEAR es_stream.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_category IS NOT INITIAL.
+
+      IF iv_material_category EQ 'CDSR'.
+        DATA(lv_form) = 'C'.
+      ELSEIF iv_material_category EQ 'EDSR'.
+        lv_form = 'E'.
+      ELSEIF iv_material_category EQ 'HDSR'.
+        lv_form = 'H'.
+      ENDIF.
+
+      SUBMIT zde_jor_dp WITH p_pcode  = iv_project_id
+                        WITH p_form   = lv_form
+                        WITH p_skipdp = abap_true AND RETURN.
+
+      SELECT SINGLE *
+      FROM zjor_justif_stat
+      INTO @DATA(ls_jor_justif_stat)
+      WHERE zproj_id EQ @iv_project_id.
+      IF sy-subrc EQ 0.
+        es_stream-mime_type = ls_jor_justif_stat-zfile_type.
+        es_stream-value     = ls_jor_justif_stat-zfile_value.
+
+        DELETE zjor_justif_stat FROM @( VALUE #( zproj_id = iv_project_id ) ).
+        COMMIT WORK.
+      ELSE.
+        MESSAGE e015(zjor) INTO DATA(ls_message) ##NEEDED.
+        RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_JUSTIFIED_RATES
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IT_MATERIAL_NO                 TYPE        /IWBEP/T_COD_SELECT_OPTIONS
+* | [<---] ET_JUSTIFIEDRATES              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_JUSTIFIEDRATES
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_justified_rates.
+
+    DATA:lv_mon(2)            TYPE n,
+         lv_sdate             TYPE sy-datum,
+         lv_edate             TYPE sy-datum,
+         lv_kst001            TYPE keph-kst001,
+         lv_costing_variant   TYPE ck_klvar,
+         lv_valuation_variant TYPE ck_bwvar.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_category IS NOT INITIAL AND
+       it_material_no IS NOT INITIAL.
+
+*Get start and end date
+      CLEAR lv_mon.
+      lv_mon = sy-datum+4(2).
+
+      IF lv_mon = '12'.
+        lv_mon = '01'.
+        sy-datum+0(4) = sy-datum+0(4) + 1.
+        sy-datum+4(2) = lv_mon.
+      ELSE.
+        lv_mon = lv_mon + 1.
+        sy-datum+4(2) = lv_mon.
+      ENDIF.
+
+      CALL FUNCTION 'HR_JP_MONTH_BEGIN_END_DATE'
+        EXPORTING
+          iv_date             = sy-datum
+        IMPORTING
+          ev_month_begin_date = lv_sdate
+          ev_month_end_date   = lv_edate.
+
+      LOOP AT it_material_no ASSIGNING FIELD-SYMBOL(<lfs_material_no>).
+
+*Select costing variant
+        CLEAR lv_costing_variant.
+        SELECT SINGLE klvar
+        FROM zmaterial_upl2
+        INTO lv_costing_variant
+        WHERE matnr EQ <lfs_material_no>-low ##WARN_OK.
+        IF sy-subrc NE 0.
+          IF iv_material_category = 'CDSR'.
+            lv_costing_variant = 'ZPC1'.
+          ELSEIF iv_material_category = 'EDSR'.
+            lv_costing_variant = 'ZEC1'.
+          ELSEIF iv_material_category = 'HDSR'.
+            lv_costing_variant = 'ZH1'.
+          ENDIF.
+        ENDIF.
+
+*Validate costing variant
+        IF lv_costing_variant IS NOT INITIAL.
+          SELECT SINGLE @abap_true
+          FROM zjor_klvar
+          WHERE klvar1 EQ @lv_costing_variant
+          INTO @DATA(lv_exists).
+          IF lv_exists EQ abap_false.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+
+*Select valuation variant
+        CLEAR lv_valuation_variant.
+        SELECT SINGLE bwvar
+        FROM zjor_klvar
+        INTO lv_valuation_variant
+        WHERE klvar1 EQ lv_costing_variant.
+        IF sy-subrc NE 0.
+          CONTINUE.
+        ENDIF.
+
+        IF lv_sdate IS NOT INITIAL AND
+           lv_edate IS NOT INITIAL AND
+           lv_valuation_variant IS NOT INITIAL.
+
+          SELECT *
+          FROM keko
+          INTO TABLE @DATA(lt_keko)
+          WHERE matnr = @<lfs_material_no>-low AND
+                kadky BETWEEN @lv_sdate AND @lv_edate AND
+                bwvar = @lv_valuation_variant.
+          IF sy-subrc EQ 0.
+            SORT lt_keko BY kalnr kadky DESCENDING.
+            DELETE ADJACENT DUPLICATES FROM lt_keko COMPARING kalnr.
+          ENDIF.
+
+        ENDIF.
+
+*Map product costing data
+        IF lt_keko IS NOT INITIAL.
+
+          DATA(ls_keko) = lt_keko[ 1 ].
+
+          SELECT SINGLE *
+          FROM keph INTO @DATA(ls_keph)
+          WHERE kalnr = @ls_keko-kalnr AND
+                kadky = @ls_keko-kadky AND
+                bwvar = @ls_keko-bwvar AND
+                kkzst = @space ##WARN_OK.
+          IF sy-subrc EQ 0.
+
+            lv_kst001 = ls_keph-kst001 + ls_keph-kst002 + ls_keph-kst003 + ls_keph-kst004 + ls_keph-kst005 +
+                        ls_keph-kst006 + ls_keph-kst007 + ls_keph-kst008 + ls_keph-kst009 + ls_keph-kst010 +
+                        ls_keph-kst011 + ls_keph-kst012 + ls_keph-kst013 + ls_keph-kst014 + ls_keph-kst015 +
+                        ls_keph-kst016 + ls_keph-kst017 + ls_keph-kst018 + ls_keph-kst019 + ls_keph-kst020 +
+                        ls_keph-kst021 + ls_keph-kst022 + ls_keph-kst023 + ls_keph-kst024 + ls_keph-kst025 +
+                        ls_keph-kst026 + ls_keph-kst027 + ls_keph-kst028 + ls_keph-kst029 + ls_keph-kst030 +
+                        ls_keph-kst031 + ls_keph-kst032 + ls_keph-kst033 + ls_keph-kst034 + ls_keph-kst035 +
+                        ls_keph-kst036 + ls_keph-kst037 + ls_keph-kst038 + ls_keph-kst039 + ls_keph-kst040 +
+                        ls_keph-kst041 + ls_keph-kst042 + ls_keph-kst043 + ls_keph-kst044 + ls_keph-kst045 +
+                        ls_keph-kst046 + ls_keph-kst047 + ls_keph-kst048 + ls_keph-kst049 + ls_keph-kst050 +
+                        ls_keph-kst051 + ls_keph-kst052 + ls_keph-kst053 + ls_keph-kst054 + ls_keph-kst055 +
+                        ls_keph-kst056 + ls_keph-kst057 + ls_keph-kst058 + ls_keph-kst059 + ls_keph-kst060 +
+                        ls_keph-kst061 + ls_keph-kst062 + ls_keph-kst063 + ls_keph-kst064 + ls_keph-kst065 +
+                        ls_keph-kst066 + ls_keph-kst067 + ls_keph-kst068 + ls_keph-kst069 + ls_keph-kst070 +
+                        ls_keph-kst071 + ls_keph-kst072 + ls_keph-kst073 + ls_keph-kst074 + ls_keph-kst075 +
+                        ls_keph-kst076 + ls_keph-kst077 + ls_keph-kst078 + ls_keph-kst079 + ls_keph-kst080 +
+                        ls_keph-kst081 + ls_keph-kst082 + ls_keph-kst083 + ls_keph-kst084 + ls_keph-kst085 +
+                        ls_keph-kst086 + ls_keph-kst087 + ls_keph-kst088 + ls_keph-kst089 + ls_keph-kst090 +
+                        ls_keph-kst091 + ls_keph-kst092 + ls_keph-kst093 + ls_keph-kst094 + ls_keph-kst095 +
+                        ls_keph-kst096 + ls_keph-kst097 + ls_keph-kst098 + ls_keph-kst099 + ls_keph-kst100 +
+                        ls_keph-kst101 + ls_keph-kst102 + ls_keph-kst103 + ls_keph-kst104 + ls_keph-kst105 +
+                        ls_keph-kst106 + ls_keph-kst107 + ls_keph-kst108 + ls_keph-kst109 + ls_keph-kst110 +
+                        ls_keph-kst111 + ls_keph-kst112 + ls_keph-kst113 + ls_keph-kst114 + ls_keph-kst115 +
+                        ls_keph-kst116 + ls_keph-kst117 + ls_keph-kst118 + ls_keph-kst119 + ls_keph-kst120.
+
+            SELECT SINGLE zmat_no,
+                          mat_cat,
+                          zmat_desc,
+                          zquant,
+                          uom,
+                          zsys_rate,
+                          zamount
+            FROM zde_estimate1
+            INTO @DATA(ls_estimate)
+            WHERE zproj_id = @iv_project_id AND
+                  zmat_no = @<lfs_material_no>-low ##WARN_OK.
+            IF sy-subrc EQ 0.
+
+*Map justified rates
+              APPEND INITIAL LINE TO et_justifiedrates ASSIGNING FIELD-SYMBOL(<lfs_justifiedrates>).
+              IF <lfs_justifiedrates> IS ASSIGNED.
+                <lfs_justifiedrates>-itemnumber  = <lfs_material_no>-low.
+                <lfs_justifiedrates>-description = ls_estimate-zmat_desc.
+                <lfs_justifiedrates>-quantity    = ls_estimate-zquant.
+                <lfs_justifiedrates>-uom         = ls_estimate-uom.
+
+                IF ls_keko-losgr EQ 0.
+                  <lfs_justifiedrates>-justifiedrate = lv_kst001.
+                ELSE.
+                  <lfs_justifiedrates>-justifiedrate = lv_kst001 / ls_keko-losgr.
+                ENDIF.
+
+                <lfs_justifiedrates>-justifiedamount = ( <lfs_justifiedrates>-justifiedrate * ls_estimate-zquant ).
+              ENDIF.
+
+            ENDIF.
+          ENDIF.
+
+        ENDIF.
+
+        CLEAR:lv_exists,lt_keko,ls_keph,ls_estimate.
+      ENDLOOP.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->GET_MATERIAL_DESCRIPTION
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_MATERIAL_NO                 TYPE        CHAR18
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [<-()] RV_MATERIAL_LONG_TEXT          TYPE        CHAR1024
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD get_material_description.
+
+    DATA:lv_material TYPE thead-tdname.
+    DATA:lt_lines TYPE tline_t.
+
+    CLEAR rv_material_long_text.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_no IS NOT INITIAL.
+
+      CLEAR lv_material.
+      lv_material = iv_material_no.
+
+      CLEAR lt_lines.
+      CALL FUNCTION 'READ_TEXT'
+        EXPORTING
+          client                  = sy-mandt
+          id                      = 'GRUN'
+          language                = 'E'
+          name                    = lv_material
+          object                  = 'MATERIAL'
+        TABLES
+          lines                   = lt_lines
+        EXCEPTIONS
+          id                      = 1
+          language                = 2
+          name                    = 3
+          not_found               = 4
+          object                  = 5
+          reference_check         = 6
+          wrong_access_to_archive = 7
+          OTHERS                  = 8.
+      IF sy-subrc <> 0.
+
+      ELSE.
+        IF lt_lines IS NOT INITIAL.
+          LOOP AT lt_lines ASSIGNING FIELD-SYMBOL(<ls_line>).
+            REPLACE ALL OCCURRENCES OF '<(>&<)>' IN <ls_line>-tdline WITH '&'.
+            CONCATENATE rv_material_long_text <ls_line>-tdline INTO rv_material_long_text SEPARATED BY space.
+          ENDLOOP.
+        ENDIF.
+      ENDIF.
+
+      IF rv_material_long_text IS INITIAL.
+        SELECT SINGLE zmat_desc
+        FROM zde_estimate1
+        INTO @DATA(lv_mat_descp)
+        WHERE zproj_id EQ @iv_project_id AND
+              zmat_no  EQ @iv_material_no ##WARN_OK.
+        IF sy-subrc EQ 0.
+          rv_material_long_text = lv_mat_descp.
+        ENDIF.
+      ENDIF.
+
+      IF rv_material_long_text IS INITIAL.
+        SELECT SINGLE c~ztext
+        FROM mast AS a INNER JOIN stpo AS b ON a~stlnr EQ b~stlnr
+                       INNER JOIN stzu AS c ON c~stlnr EQ a~stlnr
+        INTO @DATA(lv_material_descp)
+        WHERE a~matnr = @iv_material_no ##WARN_OK.
+        IF sy-subrc EQ 0.
+          rv_material_long_text = lv_material_descp.
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->SAVE_PRICE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_BOM_COMPONENTS              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [<---] EV_SUCCESS                     TYPE        BOOLEAN
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD save_price.
+
+    DATA:lt_save_price TYPE STANDARD TABLE OF zdar_price_updat.
+
+    CLEAR ev_success.
+
+    IF it_bom_components IS NOT INITIAL.
+
+*Get existing price
+      SELECT *
+      FROM zdar_price_updat
+      INTO TABLE @DATA(lt_price_exist)
+      FOR ALL ENTRIES IN @it_bom_components
+      WHERE idnrk EQ @it_bom_components-componentid AND
+            pspnr EQ @iv_project_id.
+      IF sy-subrc EQ 0.
+        SORT lt_price_exist BY idnrk.
+      ENDIF.
+
+*Map price data to save
+      LOOP AT it_bom_components ASSIGNING FIELD-SYMBOL(<lfs_bom_comp>) WHERE marketrate IS NOT INITIAL.
+
+        IF line_exists( lt_price_exist[ idnrk = <lfs_bom_comp>-componentid ] ).
+          IF ( lt_price_exist[ idnrk = <lfs_bom_comp>-componentid ]-stprs EQ <lfs_bom_comp>-marketrate ).
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+
+        APPEND INITIAL LINE TO lt_save_price ASSIGNING FIELD-SYMBOL(<lfs_save_price>).
+        IF <lfs_save_price> IS ASSIGNED.
+
+          IF line_exists( lt_price_exist[ idnrk = <lfs_bom_comp>-componentid ] ).
+            <lfs_save_price> = CORRESPONDING #( lt_price_exist[ idnrk = <lfs_bom_comp>-componentid ] ) ##OPERATOR[LT_PRICE_EXIST].
+            <lfs_save_price>-chg_date  = sy-datum.
+            <lfs_save_price>-chg_name  = sy-uname.
+          ELSE.
+            <lfs_save_price>-cre_date = sy-datum.
+            <lfs_save_price>-cre_name = sy-uname.
+          ENDIF.
+
+          <lfs_save_price>-mandt   = sy-mandt.
+          <lfs_save_price>-pspnr   = iv_project_id.
+          <lfs_save_price>-stprs   = <lfs_bom_comp>-marketrate.
+          <lfs_save_price>-remarks = <lfs_bom_comp>-remarks.
+          <lfs_save_price>-idnrk   = <lfs_bom_comp>-componentid.
+          <lfs_save_price>-meinh   = <lfs_bom_comp>-unit.
+
+        ENDIF.
+      ENDLOOP.
+
+*Save price
+      IF lt_save_price IS NOT INITIAL.
+        MODIFY zdar_price_updat FROM TABLE lt_save_price.
+        IF sy-subrc EQ 0.
+          COMMIT WORK.
+
+          ev_success = abap_true.
+        ENDIF.
+      ELSE.
+        MESSAGE e010(zjor) INTO DATA(ls_message) ##NEEDED.
+        RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZCL_ZODATA_JOR_ESTIMATE_BO->UPDATE_PRICE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_MATERIAL_CATEGORY           TYPE        ZCHARACT
+* | [--->] IV_PROJECT_ID                  TYPE        ZRPM_EXTID
+* | [--->] IT_BOM_COMPONENTS              TYPE        ZCL_ZODATA_JOR_ESTIMAT_MPC=>TT_BOMCOMPONENTS
+* | [!CX!] ZCX_JOR_EXCEPTION
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD update_price.
+
+    TYPES:lr_matnr TYPE RANGE OF matnr.
+    TYPES:lr_mtart TYPE RANGE OF mtart.
+
+    DATA:lv_mon(2)          TYPE n,
+         lv_sdate           TYPE sy-datum,
+         lv_edate           TYPE sy-datum,
+         lv_cosva(4)        TYPE c,
+         lv_cost_variant(4) TYPE c,
+         lv_lot             TYPE ck_losgr.
+
+    DATA:ls_headdata1   TYPE bapimathead,
+         ls_plantdata1  TYPE bapi_marc,
+         ls_plantdatax1 TYPE bapi_marcx,
+         ls_return      TYPE bapiret2,
+         ls_keko        TYPE keko.
+
+    DATA:lt_session_logs TYPE TABLE OF apqle.
+    DATA:lt_seltab  TYPE TABLE OF rsparams.
+    DATA:lt_matnr TYPE lr_matnr.
+    DATA:lt_mtart TYPE lr_mtart.
+
+    DATA:lt_wultb      TYPE TABLE OF stpov,
+         lt_equicat    TYPE TABLE OF cscequi,
+         lt_kndcat     TYPE TABLE OF cscknd,
+         lt_matcat     TYPE TABLE OF cscmat,
+         lt_stdcat     TYPE TABLE OF cscstd,
+         lt_tplcat     TYPE TABLE OF csctpl,
+         lt_wultb_data TYPE TABLE OF stpov,
+         lt_keph       TYPE STANDARD TABLE OF keph.
+
+    CONSTANTS:lc_fromdate  TYPE datub VALUE '20000101'.
+
+    IF iv_project_id IS NOT INITIAL AND
+       iv_material_category IS NOT INITIAL AND
+       it_bom_components IS NOT INITIAL.
+
+      lt_matnr = VALUE #( FOR ls_bom_components IN it_bom_components
+                               LET s = 'I'
+                                   o = 'EQ'
+                               IN sign   = s
+                                  option = o
+                           ( low = ls_bom_components-componentid ) ).
+
+*Check data for price update
+      SELECT matnr
+      FROM zdar_price_upd
+      INTO TABLE @DATA(lt_dar_price)
+      WHERE matnr IN @lt_matnr AND
+            update_flag = 'U'     AND
+            approve_reject = 'A'.
+      IF sy-subrc NE 0.
+        MESSAGE e019(zjor) INTO DATA(lv_message).
+        RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+      ELSE.
+
+*Get material types
+        lt_mtart = VALUE lr_mtart( sign = 'E'
+                                   option = 'EQ'
+                                 ( low = 'ZNSI' )
+                                 ( low = 'ZHVI' )
+                                 ( low = 'ZEVI' )
+                                 ( low = 'ZCVI' ) ).
+
+*Get month start date and end date
+        CLEAR lv_mon.
+        lv_mon = sy-datum+4(2).
+
+        IF lv_mon = '12'.
+          lv_mon = '01'.
+          sy-datum+0(4) = sy-datum+0(4) + 1.
+          sy-datum+4(2) = lv_mon.
+        ELSE.
+          lv_mon = lv_mon + 1.
+          sy-datum+4(2) = lv_mon.
+        ENDIF.
+
+        CALL FUNCTION 'HR_JP_MONTH_BEGIN_END_DATE'
+          EXPORTING
+            iv_date             = sy-datum
+          IMPORTING
+            ev_month_begin_date = lv_sdate
+            ev_month_end_date   = lv_edate.
+
+*Get materials from BOM component
+        LOOP AT lt_dar_price ASSIGNING FIELD-SYMBOL(<lfs_dar_price>).
+
+          CLEAR:lt_wultb,lt_equicat,lt_kndcat,lt_matcat,lt_stdcat,lt_tplcat.
+          CALL FUNCTION 'CS_WHERE_USED_MAT'
+            EXPORTING
+              datub                      = lv_sdate
+              datuv                      = sy-datum
+              matnr                      = <lfs_dar_price>-matnr
+              werks                      = 'EE01'
+            TABLES
+              wultb                      = lt_wultb
+              equicat                    = lt_equicat
+              kndcat                     = lt_kndcat
+              matcat                     = lt_matcat
+              stdcat                     = lt_stdcat
+              tplcat                     = lt_tplcat
+            EXCEPTIONS
+              call_invalid               = 1
+              material_not_found         = 2
+              no_where_used_rec_found    = 3
+              no_where_used_rec_selected = 4
+              no_where_used_rec_valid    = 5
+              OTHERS                     = 6.
+          IF sy-subrc NE 0.
+            CONTINUE.
+          ELSE.
+            SORT lt_wultb BY matnr posnr ASCENDING.
+            DELETE ADJACENT DUPLICATES FROM lt_wultb COMPARING matnr posnr.
+            APPEND LINES OF lt_wultb TO lt_wultb_data.
+          ENDIF.
+        ENDLOOP.
+
+        IF lt_wultb_data IS NOT INITIAL.
+          SORT lt_wultb_data BY matnr posnr.
+          DELETE ADJACENT DUPLICATES FROM lt_wultb_data COMPARING matnr posnr.
+
+          SELECT matnr,
+                 mtart
+          FROM mara
+          INTO TABLE @DATA(lt_materials)
+          FOR ALL ENTRIES IN @lt_wultb_data
+          WHERE matnr = @lt_wultb_data-matnr AND
+                mtart IN @lt_mtart.
+          IF sy-subrc = 0.
+            SORT lt_materials BY matnr ASCENDING.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+      SORT lt_materials BY matnr.
+      DELETE ADJACENT DUPLICATES FROM lt_materials COMPARING matnr.
+
+*Check costing variant
+      IF lt_materials IS NOT INITIAL.
+        SELECT matnr,
+               klvar
+        FROM zmaterial_upl2
+        INTO TABLE @DATA(lt_cost_var)
+        FOR ALL ENTRIES IN @lt_materials
+        WHERE matnr EQ @lt_materials-matnr.
+        IF sy-subrc NE 0.
+          SORT lt_cost_var BY matnr.
+        ENDIF.
+      ENDIF.
+
+*Get lot size of the material
+      IF lt_materials IS NOT INITIAL.
+        SELECT a~matnr,
+               a~stlnr,
+               b~bmeng AS std_bom_qty,
+               c~bmeng AS mat_bom_qty
+        FROM mast AS a LEFT OUTER JOIN stko AS b ON b~stlnr EQ a~stlnr AND
+                                                    b~stlty EQ 'S'
+                       LEFT OUTER JOIN stko AS c ON c~stlnr EQ a~stlnr AND
+                                                    c~stlty EQ 'M'
+        INTO TABLE @DATA(lt_bom_data)
+        FOR ALL ENTRIES IN @lt_materials
+        WHERE a~matnr EQ @lt_materials-matnr.
+        IF sy-subrc EQ 0.
+          LOOP AT lt_materials ASSIGNING FIELD-SYMBOL(<lfs_material>).
+
+            CLEAR ls_headdata1.
+            ls_headdata1-material_long = <lfs_material>-matnr.
+
+            CLEAR ls_plantdata1.
+            ls_plantdata1-plant = 'EE01'.
+
+            IF line_exists( lt_bom_data[ matnr = <lfs_material>-matnr ] ).
+              DATA(ls_bom_data) = lt_bom_data[ matnr = <lfs_material>-matnr ].
+
+              IF ls_bom_data-std_bom_qty IS NOT INITIAL.
+                ls_plantdata1-lot_size = ls_bom_data-std_bom_qty.
+              ELSE.
+                IF ls_bom_data-mat_bom_qty IS NOT INITIAL.
+                  ls_plantdata1-lot_size = ls_bom_data-mat_bom_qty.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+            CLEAR ls_plantdatax1.
+            ls_plantdatax1-plant    = 'EE01'.
+            ls_plantdatax1-lot_size = abap_true.
+
+            CLEAR ls_return.
+            CALL FUNCTION 'BAPI_MATERIAL_SAVEDATA'
+              EXPORTING
+                headdata   = ls_headdata1
+                plantdata  = ls_plantdata1
+                plantdatax = ls_plantdatax1
+              IMPORTING
+                return     = ls_return.
+
+            IF ls_return-type NE 'E'.
+              CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+                EXPORTING
+                  wait = abap_true.
+            ENDIF.
+
+*Read costing variant
+            CLEAR lv_cosva.
+            IF line_exists( lt_cost_var[ matnr = <lfs_material>-matnr ] ).
+              lv_cosva = lt_cost_var[ matnr = <lfs_material>-matnr ]-klvar.
+            ENDIF.
+
+            IF lv_cosva IS INITIAL.
+              IF iv_material_category = 'CDSR'.
+                lv_cosva = 'ZPC1'.
+              ELSEIF iv_material_category = 'EDSR'.
+                lv_cosva = 'ZEC1'.
+              ELSEIF iv_material_category = 'HDSR'.
+                lv_cosva = 'ZH1'.
+              ENDIF.
+            ENDIF.
+
+            IF lv_cosva IS NOT INITIAL.
+
+              CLEAR lv_cost_variant.
+              SELECT SINGLE klvar2
+              FROM zjor_klvar
+              INTO lv_cost_variant
+              WHERE klvar1 EQ lv_cosva.
+              IF lv_cost_variant IS INITIAL.
+                MESSAGE e020(zjor) INTO lv_message WITH <lfs_material>-matnr.
+                RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+              ENDIF.
+
+            ENDIF.
+
+*Calculate and update price
+            CLEAR:lv_lot,ls_keko,lt_keph.
+            lv_lot = ls_plantdata1-lot_size.
+
+            CALL FUNCTION 'CK_F_MATERIAL_CALC'
+              EXPORTING
+                klvar          = lv_cost_variant
+                matnr          = <lfs_material>-matnr
+                werks          = 'EE01'
+                losgr          = lv_lot
+                tvers          = '01'
+                kadat          = lv_sdate
+                bidat          = lv_edate
+                aldat          = lv_sdate
+                bwdat          = lv_sdate
+                s_dunkel       = abap_true
+                s_update       = 'A'
+                s_repetitive   = abap_true
+              IMPORTING
+                f_keko_exp     = ls_keko
+              TABLES
+                t_keph_exp     = lt_keph
+              EXCEPTIONS
+                wrong_call     = 1
+                keph_not_found = 2
+                locked         = 3
+                OTHERS         = 4.
+            IF sy-subrc NE 0.
+              MESSAGE e021(zjor) INTO lv_message WITH <lfs_material>-matnr.
+              RAISE EXCEPTION TYPE zcx_jor_exception USING MESSAGE.
+            ENDIF.
+          ENDLOOP.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.
