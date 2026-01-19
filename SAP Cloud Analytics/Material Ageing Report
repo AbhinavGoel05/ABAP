@@ -1,0 +1,500 @@
+Transient Provider: 2CZMM_SQL_CP_M_AGE/2CZMM_SQL_CM_M_AGE
+Technical/External Service Name: ZMM_CDS_CM_MATERIAL_AGEING_CDS
+
+CDS Views:
+ZMM_CDS_CM_MATERIAL_AGEING
+ZMM_CDS_CP_MATERIAL_AGEING
+ZMM_CDS_BA_MAT_STK_90_DAYS
+ZMM_CDS_CP_MAT_STK_90_DAYS
+ZMM_CDS_BA_MAT_STK_180_DAYS
+ZMM_CDS_CP_MAT_STK_180_DAYS
+ZMM_CDS_BA_MAT_STK_270_DAYS
+ZMM_CDS_CP_MAT_STK_270_DAYS
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_CM_MATERIAL_AGEING
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CM_M_AGE'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Material Ageing'
+@OData.publish: true
+@Analytics.query: true
+@ObjectModel.supportedCapabilities: [ #ANALYTICAL_PROVIDER ]
+
+define view ZMM_CDS_CM_MATERIAL_AGEING
+  as select from ZMM_CDS_CP_MATERIAL_AGEING
+{
+  key Material,
+  key Plant,
+  key StorageLocation,
+  key BatchNumber,
+      MaterialDescription,
+      CatalogNumber,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      TotalUnrestrictedStk,
+      PurchaseOrganization,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      FirstIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      FirstIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      SecondIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      SecondIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      ThirdIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      ThirdIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      ExceptionQuantity,
+      UOM,
+      CompanyCode,
+      CurrencyKey,
+      /* Associations */
+      _ThirdIntStock
+}
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_CP_MATERIAL_AGEING
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CP_M_AGE'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Material Ageing'
+@VDM.viewType: #COMPOSITE
+@Analytics.dataCategory: #CUBE
+@ObjectModel.modelingPattern: #ANALYTICAL_CUBE
+@ObjectModel.supportedCapabilities: [ #ANALYTICAL_PROVIDER ]
+
+define view ZMM_CDS_CP_MATERIAL_AGEING
+  as select from    mara
+    inner join      makt                on  makt.matnr = mara.matnr
+                                        and makt.spras = $session.system_language
+    inner join      nsdm_v_mchb as mchb on  mchb.matnr =  mara.matnr
+                                        and mchb.werks =  '1AD1'
+                                        and mchb.clabs <> 0
+    left outer join t024w               on t024w.werks = mchb.werks
+    left outer join mbew                on  mbew.matnr =  mara.matnr
+                                        and mbew.bwkey =  mchb.werks
+                                        and mbew.bwtar =  mchb.charg
+                                        and mbew.bwtar <> ''
+  association [0..1] to ZMM_CDS_CP_MAT_STK_270_DAYS as _ThirdIntStock on  _ThirdIntStock.Material        = $projection.Material
+                                                                      and _ThirdIntStock.Plant           = $projection.Plant
+                                                                      and _ThirdIntStock.StorageLocation = $projection.StorageLocation
+                                                                      and _ThirdIntStock.BatchNumber     = $projection.BatchNumber
+{
+  key mara.matnr                                      as Material,
+  key mchb.werks                                      as Plant,
+  key mchb.lgort                                      as StorageLocation,
+  key mchb.charg                                      as BatchNumber,
+      makt.maktx                                      as MaterialDescription,
+      mara.mfrnr                                      as CatalogNumber,
+      mchb.clabs                                      as TotalUnrestrictedStk,
+      t024w.ekorg                                     as PurchaseOrganization,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      _ThirdIntStock.FirstIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      _ThirdIntStock.FirstIntervalStock * mbew.verpr  as FirstIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      _ThirdIntStock.SecondIntervalStock              as SecondIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      _ThirdIntStock.SecondIntervalStock * mbew.verpr as SecondIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      _ThirdIntStock.ThirdIntervalStock               as ThirdIntervalStock,
+      @Semantics.amount.currencyCode: 'CurrencyKey'
+      _ThirdIntStock.ThirdIntervalStock * mbew.verpr  as ThirdIntervalValue,
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      case when _ThirdIntStock.ThirdIntervalRemStock > 0 then _ThirdIntStock.ThirdIntervalRemStock
+      else 0
+      end                                             as ExceptionQuantity,
+      _ThirdIntStock.UOM                              as UOM,
+      _ThirdIntStock.CompanyCode                      as CompanyCode,
+      _ThirdIntStock._CompanyCode.waers               as CurrencyKey,
+      _ThirdIntStock
+}
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_CP_MAT_STK_270_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CP_S_270'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-270 days'
+@VDM.viewType: #COMPOSITE
+
+define view ZMM_CDS_CP_MAT_STK_270_DAYS
+  as select from mara
+    inner join   makt                on  makt.matnr = mara.matnr
+                                     and makt.spras = $session.system_language
+    inner join   nsdm_v_mchb as mchb on  mchb.matnr =  mara.matnr
+                                     and mchb.werks =  '1AD1'
+                                     and mchb.clabs <> 0
+  association [0..1] to ZMM_CDS_CP_MAT_STK_180_DAYS as _SecondIntStock on  _SecondIntStock.Material        = $projection.Material
+                                                                       and _SecondIntStock.Plant           = $projection.Plant
+                                                                       and _SecondIntStock.StorageLocation = $projection.StorageLocation
+                                                                       and _SecondIntStock.BatchNumber     = $projection.BatchNumber
+  association [0..1] to ZMM_CDS_BA_MAT_STK_270_DAYS as _ThirdIntStock  on  _ThirdIntStock.Material        = $projection.Material
+                                                                       and _ThirdIntStock.Plant           = $projection.Plant
+                                                                       and _ThirdIntStock.StorageLocation = $projection.StorageLocation
+                                                                       and _ThirdIntStock.BatchNumber     = $projection.BatchNumber
+  association [0..1] to t001                        as _CompanyCode    on  _CompanyCode.bukrs = $projection.companycode
+{
+  key mara.matnr                                                                    as Material,
+  key mchb.werks                                                                    as Plant,
+  key mchb.lgort                                                                    as StorageLocation,
+  key mchb.charg                                                                    as BatchNumber,
+      _SecondIntStock.UOM,
+      _SecondIntStock.CompanyCode,
+      _SecondIntStock.FirstIntervalStock,
+      _SecondIntStock.SecondIntervalStock,
+
+      cast( case when _ThirdIntStock.TotalQuantity < _SecondIntStock.SecondIntervalRemStock then _ThirdIntStock.TotalQuantity
+                 when _SecondIntStock.SecondIntervalRemStock = _ThirdIntStock.TotalQuantity then _SecondIntStock.SecondIntervalRemStock
+            else _SecondIntStock.SecondIntervalRemStock end as abap.quan( 13, 3 ) ) as ThirdIntervalStock,
+
+      cast( case when _ThirdIntStock.TotalQuantity < _SecondIntStock.SecondIntervalRemStock then _SecondIntStock.SecondIntervalRemStock - _ThirdIntStock.TotalQuantity
+                 when _SecondIntStock.SecondIntervalRemStock = _ThirdIntStock.TotalQuantity then 0
+            else 0 end as abap.quan( 13, 3 ) )                                      as ThirdIntervalRemStock,
+
+      _SecondIntStock,
+      _ThirdIntStock,
+      _CompanyCode
+}
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_BA_MAT_STK_270_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-270 days'
+@Metadata.ignorePropagatedAnnotations: true
+@ObjectModel.usageType:{
+    serviceQuality: #X,
+    sizeCategory: #S,
+    dataClass: #MIXED
+}
+@VDM.viewType: #BASIC
+
+define view entity ZMM_CDS_BA_MAT_STK_270_DAYS
+  as select from matdoc
+{
+  key matnr        as Material,
+  key werks        as Plant,
+  key lgort        as StorageLocation,
+  key charg        as BatchNumber,
+      bukrs        as CompanyCode,
+      meins        as UOM,
+
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      sum( menge ) as TotalQuantity
+}
+where
+        charg =  'PURCHASE'
+  and(
+        bwart =  '101'
+    or  bwart =  '102'
+    or  bwart =  '104'
+    or  bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  '105'
+  )
+  and(
+        bldat >= dats_add_days(dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-91,'NULL'),-90,'NULL')
+    and bldat <= dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-91,'NULL')
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+
+union
+
+select from matdoc
+{
+  key       matnr        as Material,
+  key       werks        as Plant,
+  key       lgort        as StorageLocation,
+  key       charg        as BatchNumber,
+            bukrs        as CompanyCode,
+            meins        as UOM,
+            sum( menge ) as TotalQuantity
+}
+where
+        charg =  'FOC'
+  and(
+        bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  'Z01'
+    or  bwart =  'Z02'
+  )
+  and(
+        bldat >= dats_add_days(dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-91,'NULL'),-90,'NULL')
+    and bldat <= dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-91,'NULL')
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_CP_MAT_STK_180_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CP_S_180'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-180 days'
+@VDM.viewType: #COMPOSITE
+
+define view ZMM_CDS_CP_MAT_STK_180_DAYS
+  as select from mara
+    inner join   makt                on  makt.matnr = mara.matnr
+                                     and makt.spras = $session.system_language
+    inner join   nsdm_v_mchb as mchb on  mchb.matnr =  mara.matnr
+                                     and mchb.werks =  '1AD1'
+                                     and mchb.clabs <> 0
+  association [0..1] to ZMM_CDS_CP_MAT_STK_90_DAYS  as _FirstIntStock  on  _FirstIntStock.Material        = $projection.Material
+                                                                       and _FirstIntStock.Plant           = $projection.Plant
+                                                                       and _FirstIntStock.StorageLocation = $projection.StorageLocation
+                                                                       and _FirstIntStock.BatchNumber     = $projection.BatchNumber
+  association [0..1] to ZMM_CDS_BA_MAT_STK_180_DAYS as _SecondIntStock on  _SecondIntStock.Material        = $projection.Material
+                                                                       and _SecondIntStock.Plant           = $projection.Plant
+                                                                       and _SecondIntStock.StorageLocation = $projection.StorageLocation
+                                                                       and _SecondIntStock.BatchNumber     = $projection.BatchNumber
+{
+  key mara.matnr                                                                  as Material,
+  key mchb.werks                                                                  as Plant,
+  key mchb.lgort                                                                  as StorageLocation,
+  key mchb.charg                                                                  as BatchNumber,
+      _FirstIntStock.UOM,
+      _FirstIntStock.CompanyCode,
+      _FirstIntStock.FirstIntervalStock,
+
+      cast( case when _SecondIntStock.TotalQuantity < _FirstIntStock.FirstIntervalRemStock then _SecondIntStock.TotalQuantity
+                 when _FirstIntStock.FirstIntervalRemStock = _SecondIntStock.TotalQuantity then _FirstIntStock.FirstIntervalRemStock
+            else _FirstIntStock.FirstIntervalRemStock end as abap.quan( 13, 3 ) ) as SecondIntervalStock,
+
+      cast( case when _SecondIntStock.TotalQuantity < _FirstIntStock.FirstIntervalRemStock then _FirstIntStock.FirstIntervalRemStock - _SecondIntStock.TotalQuantity
+                 when _FirstIntStock.FirstIntervalRemStock = _SecondIntStock.TotalQuantity then 0
+            else 0 end as abap.quan( 13, 3 ) )                                    as SecondIntervalRemStock,
+
+      _FirstIntStock,
+      _SecondIntStock
+}
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_BA_MAT_STK_180_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-180 days'
+@Metadata.ignorePropagatedAnnotations: true
+@ObjectModel.usageType:{
+    serviceQuality: #X,
+    sizeCategory: #S,
+    dataClass: #MIXED
+}
+@VDM.viewType: #BASIC
+
+define view entity ZMM_CDS_BA_MAT_STK_180_DAYS
+  as select from matdoc
+{
+  key matnr        as Material,
+  key werks        as Plant,
+  key lgort        as StorageLocation,
+  key charg        as BatchNumber,
+      bukrs        as CompanyCode,
+      meins        as UOM,
+
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      sum( menge ) as TotalQuantity
+}
+where
+        charg =  'PURCHASE'
+  and(
+        bwart =  '101'
+    or  bwart =  '102'
+    or  bwart =  '104'
+    or  bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  '105'
+  )
+  and(
+        bldat >= dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-90,'NULL')
+    and bldat <= dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL')
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+
+union
+
+select from matdoc
+{
+  key       matnr        as Material,
+  key       werks        as Plant,
+  key       lgort        as StorageLocation,
+  key       charg        as BatchNumber,
+            bukrs        as CompanyCode,
+            meins        as UOM,
+            sum( menge ) as TotalQuantity
+}
+where
+        charg =  'FOC'
+  and(
+        bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  'Z01'
+    or  bwart =  'Z02'
+  )
+  and(
+        bldat >= dats_add_days(dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL'),-90,'NULL')
+    and bldat <= dats_add_days( cast($session.system_date as bldat preserving type ), -91, 'NULL')
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_CP_MAT_STK_90_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CP_MS_90'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-90 days'
+@Metadata.ignorePropagatedAnnotations: true
+@VDM.viewType: #COMPOSITE
+
+define view ZMM_CDS_CP_MAT_STK_90_DAYS
+  as select from mara
+    inner join   makt                on  makt.matnr = mara.matnr
+                                     and makt.spras = $session.system_language
+    inner join   nsdm_v_mchb as mchb on  mchb.matnr =  mara.matnr
+                                     and mchb.werks =  '1AD1'
+                                     and mchb.clabs <> 0
+  association [0..1] to ZMM_CDS_BA_MAT_STK_90_DAYS as _FirstIntStock on  _FirstIntStock.Material        = $projection.Material
+                                                                     and _FirstIntStock.Plant           = $projection.Plant
+                                                                     and _FirstIntStock.StorageLocation = $projection.StorageLocation
+                                                                     and _FirstIntStock.BatchNumber     = $projection.BatchNumber
+{
+  key mara.matnr                                             as Material,
+  key mchb.werks                                             as Plant,
+  key mchb.lgort                                             as StorageLocation,
+  key mchb.charg                                             as BatchNumber,
+
+      cast( case when _FirstIntStock.TotalQuantity < mchb.clabs then _FirstIntStock.TotalQuantity
+                 when mchb.clabs = _FirstIntStock.TotalQuantity then mchb.clabs
+                 else mchb.clabs end as abap.quan( 13, 3 ) ) as FirstIntervalStock,
+
+      cast( case when _FirstIntStock.TotalQuantity < mchb.clabs then mchb.clabs - _FirstIntStock.TotalQuantity
+                 when mchb.clabs = _FirstIntStock.TotalQuantity then 0
+                 else 0 end as abap.quan( 13, 3 ) )          as FirstIntervalRemStock,
+
+      _FirstIntStock.UOM,
+      _FirstIntStock.CompanyCode,
+      _FirstIntStock
+}
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
+-------------------------------------------------------->>>>>--------------------------------------------------------
+ZMM_CDS_BA_MAT_STK_90_DAYS
+-------------------------------------------------------->>>>>--------------------------------------------------------
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Total Material Stock for last 0-90 days'
+@Metadata.ignorePropagatedAnnotations: true
+@ObjectModel.usageType:{
+    serviceQuality: #X,
+    sizeCategory: #S,
+    dataClass: #MIXED
+}
+@VDM.viewType: #BASIC
+
+define view entity ZMM_CDS_BA_MAT_STK_90_DAYS
+  as select from matdoc
+{
+  key matnr        as Material,
+  key werks        as Plant,
+  key lgort        as StorageLocation,
+  key charg        as BatchNumber,
+      bukrs        as CompanyCode,
+      meins        as UOM,
+
+      @Semantics.quantity.unitOfMeasure: 'UOM'
+      sum( menge ) as TotalQuantity
+}
+where
+        charg =  'PURCHASE'
+  and(
+        bwart =  '101'
+    or  bwart =  '102'
+    or  bwart =  '104'
+    or  bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  '105'
+  )
+  and(
+        bldat >= dats_add_days( cast($session.system_date as bldat preserving type ), -90, 'NULL')
+    and bldat <= $session.system_date
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+
+union
+
+select from matdoc
+{
+  key       matnr        as Material,
+  key       werks        as Plant,
+  key       lgort        as StorageLocation,
+  key       charg        as BatchNumber,
+            bukrs        as CompanyCode,
+            meins        as UOM,
+            sum( menge ) as TotalQuantity
+}
+where
+        charg =  'FOC'
+  and(
+        bwart =  '561'
+    or  bwart =  '562'
+    or  bwart =  'Z01'
+    or  bwart =  'Z02'
+  )
+  and(
+        bldat >= dats_add_days( cast($session.system_date as bldat preserving type ), -90, 'NULL')
+    and bldat <= $session.system_date
+  )
+group by
+  matnr,
+  werks,
+  lgort,
+  charg,
+  bukrs,
+  meins
+--------------------------------------------------------<<<<<--------------------------------------------------------
+
