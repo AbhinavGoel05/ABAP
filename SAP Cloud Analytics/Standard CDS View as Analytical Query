@@ -1,0 +1,66 @@
+ CDS views are now been exposed as OData service and also Analytical query capability is enabled for them.
+
+CDS Viewname            : I_StockQuantityCurrentValue                             (Existing)
+SQL Viewname            : ISTOCKQUANVALCUR                                        (Existing)
+Modelling Cube Name     : 2CISTOCKQUANVALCUR                                      (Existing)
+Consumption CDS View    : ZMM_CDS_CM_STKQTYCURVL                                  (Generated)       Released Contract C1
+Consumption SQL View    : ZMM_SQL_CM_SQCVL                                        (Generated)
+OData Service           : ZMM_CDS_CM_STKQTYCURVL_CDS                              (Generated)
+RSRT Query              : 2CISTOCKQUANVALCUR/2CZMM_SQL_CM_SQCVL                   (Generated)
+OData Service URL       : https://fioridev.velora.ae/sap/opu/odata/sap/ZMM_CDS_CM_STKQTYCURVL_CDS/$metadata
+
+--------------------------------------------------->>>>>---------------------------------------------------
+ZMM_CDS_CM_STKQTYCURVL
+--------------------------------------------------->>>>>---------------------------------------------------
+@AbapCatalog.sqlViewName: 'ZMM_SQL_CM_SQCVL'
+@AbapCatalog.compiler.compareFilter: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Consumption View for Stock Quantity Current Value'
+@VDM.viewType: #CONSUMPTION
+@OData.publish: true
+@Analytics.query: true
+@ObjectModel.supportedCapabilities: [ #ANALYTICAL_QUERY , #ANALYTICAL_PROVIDER, #CDS_MODELING_DATA_SOURCE ]
+
+define view ZMM_CDS_CM_STKQTYCURVL
+  with parameters
+    P_DisplayCurrency : nsdm_display_currency
+  as select from I_StockQuantityCurrentValue(P_DisplayCurrency : :P_DisplayCurrency)
+{
+  key Product,
+  key Plant,
+  key StorageLocation,
+  key Batch,
+  key Supplier,
+  key SDDocument,
+  key SDDocumentItem,
+  key WBSElementInternalID,
+  key Customer,
+  key SpecialStockIdfgStockOwner,
+  key InventoryStockType,
+  key InventorySpecialStockType,
+  key MaterialBaseUnit,
+  key Currency,
+      DisplayCurrency,
+      MatlWrhsStkQtyInMatlBaseUnit,
+      StockValueInCCCrcy,
+      StockValueInDisplayCurrency,
+      ProductGroup,
+      ProductType,
+      /* Associations */
+      _Currency,
+      _Customer,
+      _InventorySpecialStockType,
+      _InventoryStockType,
+      _Plant,
+      _Product,
+      _ProductGroup,
+      _ProductGroup_2,
+      _ProductType,
+      _SpecialStockIdfgStockOwner,
+      _StorageLocation,
+      _Supplier,
+      _UnitOfMeasure
+}
+---------------------------------------------------<<<<<---------------------------------------------------
+
+--------------------------------------------------->>>>>---------------------------------------------------
