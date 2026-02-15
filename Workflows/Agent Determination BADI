@@ -1,0 +1,223 @@
+Enhancement Spot: MMPUR_WORKFLOW_AGENTS_V2
+BADI Definition: MMPUR_WORKFLOW_AGENTS_V2
+Filter Value: BUSINESSOBJECT = PurchaseRequisition
+
+BADI Implementation Code:
+  METHOD if_mmpur_workflow_agents_v2~get_approvers.
+    "Code below demonstrates the following: How to use parameter previous approver list,
+    "                                       How to use whitelisted CDS view I_PurchaseRequisitionApi01 and I_PurchaseRequisitionItemApi01,
+    "                                       How to differentiate between Procurement Hub and Local scenario using above CDS view.
+    "                                       How to use step info to determine step level approver
+    DATA:
+      ls_badi_approver     TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_s_badi_approver,
+      lt_badi_approver     TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_t_badi_approver,
+      ls_previous_approver TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_s_previous_approver,
+      ls_new_approver      TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_s_badi_approver.
+
+    DATA: lv_level TYPE i.
+    DATA: lv_previousstep TYPE i.
+
+    DATA:lt_mailtext     TYPE bcsy_text,
+         lv_size         TYPE so_obj_len,
+         lv_subject      TYPE so_obj_des,
+         lv_sender_email TYPE adr6-smtp_addr VALUE 'no-reply@company.com',
+         lv_user         TYPE bapibname-bapibname,
+         ls_address      TYPE bapiaddr3,
+         lt_return       TYPE TABLE OF bapiret2,
+         lv_my_inbox_url TYPE string.
+
+    DATA:lo_send_request TYPE REF TO cl_bcs,
+         lo_document     TYPE REF TO cl_document_bcs,
+         lo_sender       TYPE REF TO if_sender_bcs,
+         lo_recipient    TYPE REF TO if_recipient_bcs.
+
+    DATA:ls_requestor_addr        TYPE bapiaddr3,
+         ls_current_approver_addr TYPE bapiaddr3.
+
+    IF businessobject CS 'PurchaseRequisition'.
+
+      SELECT SINGLE PurchasingOrganization, PurchasingGroup, PurchaseRequisitionType,MaterialGroup, plant  FROM
+       i_purchaserequisitionitemapi01 INTO @DATA(ls_item)
+      WHERE purchaserequisition = @purchasingdocument." AND PurchaseRequisitionItem = @purchasingdocumentitem.
+
+
+      IF sy-subrc EQ 0.
+        " The below code is for local scenario.
+** define the list of BADI approvers for local scenario
+        lv_level = lines( previousapproverlist ).
+**  -----  Approval Level 1
+        IF lv_level = 0.
+          IF ls_item-PurchasingOrganization EQ '2000'.
+            SELECT SINGLE approver FROM zcon_agent_det INTO ls_badi_approver-businessuser WHERE
+            bsart = ls_item-purchaserequisitiontype AND ekorg = ls_item-purchasingorganization
+            AND ekgrp = ls_item-purchasinggroup AND plant = ls_item-plant  AND zlevel EQ 1.
+          ELSE.
+            SELECT SINGLE approver FROM zcon_agent_det INTO ls_badi_approver-businessuser WHERE
+            bsart = ls_item-purchaserequisitiontype AND ekorg = ls_item-purchasingorganization
+            AND ekgrp = ls_item-purchasinggroup  AND zlevel EQ 1.
+          ENDIF.
+
+          IF ls_badi_approver-businessuser IS NOT INITIAL.
+            ls_badi_approver-approvallevel = 1.
+            APPEND ls_badi_approver TO lt_badi_approver.
+          ENDIF.
+
+        ELSEIF lv_level = 1.
+
+
+          SELECT SINGLE approver FROM zcon_agent_det INTO ls_badi_approver-businessuser WHERE
+            bsart = ls_item-purchaserequisitiontype AND ekorg = ls_item-purchasingorganization
+            AND ekgrp = ls_item-purchasinggroup AND matkl = ls_item-MaterialGroup AND  zlevel EQ 2.
+
+
+          IF ls_badi_approver-businessuser IS NOT INITIAL.
+            ls_badi_approver-approvallevel = 2.
+            APPEND ls_badi_approver TO lt_badi_approver.
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+**  determine the next approval level and appropriate approvers
+      READ TABLE lt_badi_approver INTO ls_badi_approver INDEX 1.
+      LOOP AT lt_badi_approver INTO ls_new_approver
+              WHERE approvallevel = ls_badi_approver-approvallevel.
+        APPEND ls_new_approver-businessuser TO approverlist.
+      ENDLOOP.
+
+      "---------------------------------------->>>>>----------------------------------------
+      "Send email to the purchase requisition action user
+      "---------------------------------------->>>>>----------------------------------------
+      IF approverlist IS NOT INITIAL AND lv_level = 0.
+
+        lv_my_inbox_url = '<a href="https://vhhjhds4ap01.sap.slc.ae:44300/sap/bc/ui2/flp?sap-client=' &&
+                          sy-mandt &&
+                          '&sap-language=EN#WorkflowTask-displayInbox?allItems=true&">Click Here</a>'.
+
+        "Get PR Details
+        SELECT SINGLE a~banfn,a~bsart,a~ekgrp,a~ekorg,a~matkl,a~werks,a~bstyp,a~ernam,b~batxt
+        FROM eban AS a LEFT OUTER JOIN t161t AS b ON b~bsart EQ a~bsart AND b~bstyp EQ a~bstyp AND b~spras EQ @sy-langu
+        WHERE a~banfn EQ @purchasingdocument
+        INTO @DATA(ls_pr_details).
+        IF sy-subrc EQ 0.
+
+          "Get requestor details
+          CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+            EXPORTING
+              username = ls_pr_details-ernam
+            IMPORTING
+              address  = ls_requestor_addr
+            TABLES
+              return   = lt_return.
+
+          LOOP AT approverlist ASSIGNING FIELD-SYMBOL(<lfs_approver>).
+
+            "Get current approver details
+            CLEAR lt_return.
+            CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+              EXPORTING
+                username = <lfs_approver>
+              IMPORTING
+                address  = ls_current_approver_addr
+              TABLES
+                return   = lt_return.
+
+            "Email Subject
+            CLEAR lv_subject.
+            lv_subject = |Purchase requisition # { purchasingdocument } Registered|.
+
+            "Email Body
+            CLEAR lt_mailtext.
+            lt_mailtext = VALUE #( ( line = |<p>Dear { ls_current_approver_addr-fullname }</p>| )
+                                   ( line = |<p>A request is registered by { ls_requestor_addr-fullname } and you are in the approver list.You can always check approval status by following the link below.</p>| )
+                                   ( line = '<p>Request Details</p>' )
+                                   ( line = |<p>Request Number :{ purchasingdocument }</p>| )
+                                   ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                   ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                   ( line = '<p>Regards,</p>' )
+                                   ( line = '<p>SLC ITD</p>' ) ).
+
+            TRY.
+                lo_send_request = cl_bcs=>create_persistent( ).
+                IF lo_send_request IS BOUND.
+
+                  "Add document to send request
+                  lo_document = cl_document_bcs=>create_document( EXPORTING i_type    = 'HTM'
+                                                                            i_text    = lt_mailtext
+                                                                            i_subject = lv_subject ).
+                  lo_send_request->set_document( lo_document ).
+
+                  "Set sender
+                  lo_sender = cl_sapuser_bcs=>create( ls_pr_details-ernam ).
+                  lo_send_request->set_sender( lo_sender ).
+
+                  " Add recipient
+                  lo_recipient = cl_cam_address_bcs=>create_internet_address( ls_current_approver_addr-e_mail ).
+                  IF lo_recipient IS BOUND.
+                    lo_send_request->add_recipient( EXPORTING i_recipient = lo_recipient
+                                                              i_express   = 'X' ).
+                  ENDIF.
+
+                  lo_send_request->send( i_with_error_screen = 'X' ).
+                ENDIF.
+
+              CATCH cx_document_bcs INTO DATA(lo_document_bcs).
+              CATCH cx_send_req_bcs INTO DATA(lo_send_req_bcs).
+              CATCH cx_address_bcs INTO DATA(lo_address_bcs).
+
+            ENDTRY.
+          ENDLOOP.
+
+        ENDIF.
+        "----------------------------------------<<<<<----------------------------------------
+
+        "------------------------------------->>>>>--------------------------------------
+        "Trigger email notification to the PR requestor on creating PR
+        "------------------------------------->>>>>--------------------------------------
+
+        "Email Subject
+        lv_subject = |Purchase requisition # { purchasingdocument } Registered|.
+
+        "Email Body
+        lt_mailtext = VALUE #( ( line = |<p>Dear { ls_requestor_addr-fullname },| )
+                               ( line = '<p>A request has been registered with us and will be processed shortly.' )
+                               ( line = '<p>Request Details' )
+                               ( line = |<p>Request Number:{ purchasingdocument }| )
+                               ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })| )
+                               ( line = '<p>Regards,' )
+                               ( line = '<p>SLC ITD' ) ).
+
+        TRY.
+            lo_send_request = cl_bcs=>create_persistent( ).
+            IF lo_send_request IS BOUND.
+
+              "Add document to send request
+              lo_document = cl_document_bcs=>create_document( EXPORTING i_type    = 'HTM'
+                                                                        i_text    = lt_mailtext
+                                                                        i_subject = lv_subject ).
+              lo_send_request->set_document( lo_document ).
+
+              "Set sender
+              lo_sender = cl_sapuser_bcs=>create( ls_pr_details-ernam ).
+              lo_send_request->set_sender( lo_sender ).
+
+              "Add recipient
+              lo_recipient = cl_cam_address_bcs=>create_internet_address( ls_requestor_addr-e_mail ).
+              IF lo_recipient IS BOUND.
+                lo_send_request->add_recipient( EXPORTING i_recipient = lo_recipient
+                                                          i_express   = 'X' ).
+              ENDIF.
+
+              lo_send_request->send( i_with_error_screen = 'X' ).
+            ENDIF.
+
+          CATCH cx_document_bcs INTO lo_document_bcs.
+          CATCH cx_send_req_bcs INTO lo_send_req_bcs.
+          CATCH cx_address_bcs INTO lo_address_bcs.
+        ENDTRY.
+      ENDIF.
+*    "--------------------------------->>>>>--------------------------------------
+    ENDIF.
+
+
+  ENDMETHOD.
