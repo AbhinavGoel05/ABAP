@@ -1,0 +1,210 @@
+Enhancement Spot: WF_WI_FORWARD
+BAdI Definition Name: WF_WI_FORWARD
+Filter Values: WI_RH_TASK: TS90000007  Custom User Decision Task
+               WI_RH_TASK: TS00800547  Overall release of purchase requisition
+
+Implementation Code
+  METHOD if_ex_wf_wi_workitem~check_before_forward.
+
+    DATA:lv_rsnum        TYPE rsnum,
+         lv_request_type TYPE bwtxt_l,
+         lv_new_approver TYPE xubname,
+         lv_banfn        TYPE banfn,
+         lv_my_inbox_url TYPE string.
+
+    DATA:ls_requestor_addr           TYPE bapiaddr3,
+         ls_new_approver_addr        TYPE bapiaddr3,
+         lt_return                   TYPE tt_BAPIRET2,
+         lt_container                TYPE TABLE OF swr_cont,
+         lt_worklist                 TYPE TABLE OF swr_wihdr,
+         lt_message_lines            TYPE TABLE OF swr_messag,
+         lt_message_struct           TYPE TABLE OF swr_mstruc,
+         lt_subcontainer_bor_objects TYPE TABLE OF swr_cont,
+         lt_subcontainer_all_objects TYPE TABLE OF swr_cont.
+
+    DATA:lt_mailtext     TYPE bcsy_text,
+         lv_size         TYPE so_obj_len,
+         lv_subject      TYPE so_obj_des,
+         lv_sender_email TYPE adr6-smtp_addr VALUE 'no-reply@company.com',
+         lv_user         TYPE bapibname-bapibname,
+         ls_address      TYPE bapiaddr3.
+
+    DATA:lo_send_request TYPE REF TO cl_bcs,
+         lo_document     TYPE REF TO cl_document_bcs,
+         lo_sender       TYPE REF TO if_sender_bcs,
+         lo_recipient    TYPE REF TO if_recipient_bcs.
+
+    lv_my_inbox_url = '<a href="https://vhhjhds4ap01.sap.slc.ae:44300/sap/bc/ui2/flp?sap-client=' &&
+                      sy-mandt &&
+                      '&sap-language=EN#WorkflowTask-displayInbox?allItems=true&">Click Here</a>'.
+
+    IF im_wi_task EQ 'TS90000007'. "Material Reservation Approval Activity
+
+      CALL FUNCTION 'SAP_WAPI_READ_CONTAINER'
+        EXPORTING
+          workitem_id              = im_wi_id
+          language                 = sy-langu
+        TABLES
+          simple_container         = lt_container
+          message_lines            = lt_message_lines
+          message_struct           = lt_message_struct
+          subcontainer_bor_objects = lt_subcontainer_bor_objects
+          subcontainer_all_objects = lt_subcontainer_all_objects.
+
+      DELETE lt_container WHERE element NE 'HTML_TEXT'.
+      IF lt_container IS NOT INITIAL.
+        DATA(lv_html_string) = lt_container[ 4 ]-value.
+        REPLACE FIRST OCCURRENCE OF '<TR><TD>Reservation number ' IN lv_html_string WITH space.
+        lv_rsnum = lv_html_string+0(11).
+        CONDENSE lv_rsnum.
+
+        IF lv_rsnum IS NOT INITIAL.
+
+          "Get reservation requestor creator details
+          SELECT SINGLE usnam FROM rkpf WHERE rsnum EQ @lv_rsnum INTO @DATA(lv_res_created_by).
+          IF sy-subrc EQ 0.
+            CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+              EXPORTING
+                username = lv_res_created_by
+              IMPORTING
+                address  = ls_requestor_addr
+              TABLES
+                return   = lt_return.
+          ENDIF.
+
+          "Get the movement type from reservation document
+          SELECT SINGLE a~rsnum,a~bwart,b~btext_l FROM rkpf AS a INNER JOIN t156t AS b
+                 ON b~bwart EQ a~bwart AND b~spras EQ 'E' AND b~sobkz EQ @space
+          WHERE a~rsnum EQ @lv_rsnum
+          INTO @DATA(ls_movement_type).
+          IF sy-subrc EQ 0.
+            lv_request_type = | Store Reservation - { ls_movement_type-bwart } - { ls_movement_type-btext_l } |.
+          ENDIF.
+
+          "Read new approver assigned
+          IF im_table_new_agents IS NOT INITIAL.
+            lv_new_approver = im_table_new_agents[ otype = 'US' ]-objid.
+
+            CLEAR lt_return.
+            CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+              EXPORTING
+                username = lv_new_approver
+              IMPORTING
+                address  = ls_new_approver_addr
+              TABLES
+                return   = lt_return.
+
+            CALL METHOD zcl_mm_res_workflow=>send_email_to_requestor
+              EXPORTING
+                iv_reservation_no     = lv_rsnum
+                iv_recipient_email_id = ls_requestor_addr-e_mail
+                iv_sender             = sy-uname
+                iv_requestor_name     = ls_requestor_addr-fullname
+                iv_email_type         = 'Forwarded'
+                iv_request_type       = lv_request_type
+                iv_action_user_name   = ls_new_approver_addr-fullname.
+
+          ENDIF.
+        ENDIF.
+      ENDIF.
+
+    ELSEIF im_wi_task EQ 'TS00800547'. " Overall PR Release Activity
+
+      CALL FUNCTION 'SAP_WAPI_READ_CONTAINER'
+        EXPORTING
+          workitem_id              = im_wi_id
+          language                 = sy-langu
+        TABLES
+          simple_container         = lt_container
+          message_lines            = lt_message_lines
+          message_struct           = lt_message_struct
+          subcontainer_bor_objects = lt_subcontainer_bor_objects
+          subcontainer_all_objects = lt_subcontainer_all_objects.
+
+      DELETE lt_container WHERE element NE '_WI_OBJECT_ID'.
+      DATA(lv_object) = lt_container[ 1 ]-value.
+      CONDENSE lv_object.
+      lv_banfn = lv_object+10(10).
+
+      IF lv_banfn IS NOT INITIAL.
+
+        "Read new approver assigned
+        IF im_table_new_agents IS NOT INITIAL.
+          lv_new_approver = im_table_new_agents[ otype = 'US' ]-objid.
+
+          CLEAR lt_return.
+          CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+            EXPORTING
+              username = lv_new_approver
+            IMPORTING
+              address  = ls_new_approver_addr
+            TABLES
+              return   = lt_return.
+
+          "Get PR details
+          SELECT SINGLE a~banfn,a~bsart,a~bstyp,a~ernam,b~batxt FROM eban AS a LEFT OUTER JOIN t161t AS b
+                     ON b~bsart EQ a~bsart AND b~bstyp EQ a~bstyp AND b~spras EQ @sy-langu
+          WHERE a~banfn EQ @lv_banfn
+          INTO @DATA(ls_pr_details).
+          IF sy-subrc EQ 0.
+
+            "Get requestor details
+            CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+              EXPORTING
+                username = ls_pr_details-ernam
+              IMPORTING
+                address  = ls_requestor_addr
+              TABLES
+                return   = lt_return.
+
+            "Email Subject
+            lv_subject = | Purchase requisition # { lv_banfn } Registered|.
+
+            "Email Body
+            lt_mailtext = VALUE #( ( line = |<p>Dear { ls_requestor_addr-fullname },</p>| )
+                                   ( line = |<p>Your request has been forwarded to { ls_new_approver_addr-fullname }.You can always check approval status by following the below link.</p>| )
+                                   ( line = '<p>Request Details</p>' )
+                                   ( line = |<p>Request Number:{ lv_banfn }</p>| )
+                                   ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                   ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                   ( line = '<p>Regards,</p>' )
+                                   ( line = '<p>SLC ITD</p>' ) ).
+
+            TRY.
+                lo_send_request = cl_bcs=>create_persistent( ).
+                IF lo_send_request IS BOUND.
+
+                  "Add document to send request
+                  lo_document = cl_document_bcs=>create_document( EXPORTING i_type    = 'HTM'
+                                                                            i_text    = lt_mailtext
+                                                                            i_subject = lv_subject ).
+                  lo_send_request->set_document( lo_document ).
+
+                  "Set sender
+                  lo_sender = cl_sapuser_bcs=>create( sy-uname ).
+                  lo_send_request->set_sender( lo_sender ).
+
+                  "Add recipient
+                  lo_recipient = cl_cam_address_bcs=>create_internet_address( ls_requestor_addr-e_mail ).
+                  IF lo_recipient IS BOUND.
+                    lo_send_request->add_recipient( EXPORTING i_recipient = lo_recipient
+                                                              i_express   = 'X' ).
+                  ENDIF.
+
+                  lo_send_request->send( i_with_error_screen = 'X' ).
+                  COMMIT WORK.
+                ENDIF.
+
+              CATCH cx_document_bcs INTO DATA(lo_document_bcs).
+              CATCH cx_send_req_bcs INTO DATA(lo_send_req_bcs).
+              CATCH cx_address_bcs INTO DATA(lo_address_bcs).
+            ENDTRY.
+
+          ENDIF.
+
+        ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.
