@@ -1,0 +1,308 @@
+BADI to taking action on workitem. ex. Approve,reject etc.
+
+Enhancement Spot: /IWWRK/ES_WF_WI_BEFORE_UPD_IB
+BAdI Definition Name: /IWWRK/BADI_WF_BEFORE_UPD_IB
+Filter Values: Workflow scenario = WS00800157  ( OVERALL_PR_RELEASE )
+               STEP_ID = 49
+               Workflow scenario = WS00800238 ( OVERALL_PO_RELEASE )
+               STEP_ID = 19
+
+BADI Implementation
+  METHOD /iwwrk/if_wf_wi_before_upd_ib~before_update.
+
+    DATA:lv_purchase_req_no      TYPE banfn,
+         lv_action_user_comments TYPE swc_value,
+         ls_next_work_item       TYPE swwwihead,
+         lv_current_step_no(1)   TYPE c,
+         lv_next_step_no(1)      TYPE c,
+         lv_approval_level       TYPE zsno.
+
+    DATA:ls_requestor_addr           TYPE bapiaddr3,
+         ls_current_action_user_addr TYPE bapiaddr3,
+         ls_next_approver_addr       TYPE bapiaddr3.
+
+    DATA: lt_container                TYPE TABLE OF swr_cont,
+          lt_worklist                 TYPE TABLE OF swr_wihdr,
+          lt_message_lines            TYPE TABLE OF swr_messag,
+          lt_message_struct           TYPE TABLE OF swr_mstruc,
+          lt_subcontainer_bor_objects TYPE TABLE OF swr_cont,
+          lt_subcontainer_all_objects TYPE TABLE OF swr_cont,
+          lt_all_work_items           TYPE tswwwihead,
+          lt_return                   TYPE tt_BAPIRET2,
+          lv_my_inbox_url             TYPE string.
+
+    DATA:lt_mailtext TYPE bcsy_text,
+         lv_size     TYPE so_obj_len,
+         lv_subject  TYPE so_obj_des,
+         lv_user     TYPE bapibname-bapibname,
+         ls_address  TYPE bapiaddr3.
+
+    DATA:lo_send_request TYPE REF TO cl_bcs,
+         lo_document     TYPE REF TO cl_document_bcs,
+         lo_sender       TYPE REF TO if_sender_bcs,
+         lo_recipient    TYPE REF TO if_recipient_bcs.
+
+    lv_my_inbox_url = '<a href="https://vhhjhds4ap01.sap.slc.ae:44300/sap/bc/ui2/flp?sap-client=' &&
+                      sy-mandt &&
+                      '&sap-language=EN#WorkflowTask-displayInbox?allItems=true&">Click Here</a>'.
+
+    "Read workflow container
+    CALL FUNCTION 'SAP_WAPI_READ_CONTAINER'
+      EXPORTING
+        workitem_id              = is_wi_details-wi_id
+      TABLES
+        simple_container         = lt_container
+        message_lines            = lt_message_lines
+        message_struct           = lt_message_struct
+        subcontainer_bor_objects = lt_subcontainer_bor_objects
+        subcontainer_all_objects = lt_subcontainer_all_objects.
+
+    "------------->>>>>-------------
+    "Read PR number
+    "------------->>>>>-------------
+    IF line_exists( lt_container[ element = '_WI_COMP_EVENT_OBJKEY' ] ).
+      lv_purchase_req_no = lt_container[ element = '_WI_COMP_EVENT_OBJKEY' ]-value.
+    ENDIF.
+    "-------------<<<<<-------------
+
+    IF lv_purchase_req_no IS NOT INITIAL.
+
+      "------------->>>>>-------------
+      "Read action user comments
+      "------------->>>>>-------------
+      IF it_wf_container_tab[ element = 'ACTION_COMMENTS' ] IS NOT INITIAL.
+        lv_action_user_comments = it_wf_container_tab[ element = 'ACTION_COMMENTS' ]-value.
+      ENDIF.
+      "-------------<<<<<-------------
+
+      "------------->>>>>-------------
+      "Check if this is the final approval request for the workflow
+      "------------->>>>>-------------
+      IF iv_decision_key EQ '0001'.
+        SELECT SINGLE wi_id,wi_type,def_guid FROM swwwihead INTO @DATA(ls_swwwihead) WHERE wi_id   EQ @is_wi_details-wi_id AND
+                                                                                           wi_type EQ 'W'.
+        IF sy-subrc EQ 0.
+          CONDENSE ls_swwwihead-def_guid.
+          DATA(lv_total_length) = strlen( ls_swwwihead-def_guid ).
+          lv_total_length = lv_total_length - 1 .
+          IF ls_swwwihead-def_guid+lv_total_length(1) EQ 'S'.
+            lv_total_length = lv_total_length - 1 .
+            lv_current_step_no = ls_swwwihead-def_guid+lv_total_length(1).
+            lv_approval_level = lv_current_step_no.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+      "-------------<<<<<-------------
+
+      "---------------------------------------->>>>>----------------------------------------
+      "Send email to the purchase requisition requestor
+      "---------------------------------------->>>>>----------------------------------------
+
+      "Get PR details
+      SELECT SINGLE a~banfn,a~bsart,a~ekgrp,a~ekorg,a~matkl,a~werks,a~bstyp,a~ernam,b~batxt
+      FROM eban AS a LEFT OUTER JOIN t161t AS b ON b~bsart EQ a~bsart AND b~bstyp EQ a~bstyp AND b~spras EQ @sy-langu
+      WHERE a~banfn EQ @lv_purchase_req_no
+      INTO @DATA(ls_pr_details).
+      IF sy-subrc EQ 0.
+
+        "Get current action user details
+        CLEAR lt_return.
+        CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+          EXPORTING
+            username = is_wi_details-wi_aagent
+          IMPORTING
+            address  = ls_current_action_user_addr
+          TABLES
+            return   = lt_return.
+
+        "Get requestor details
+        CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+          EXPORTING
+            username = ls_pr_details-ernam
+          IMPORTING
+            address  = ls_requestor_addr
+          TABLES
+            return   = lt_return.
+
+        IF iv_decision_key EQ '0001'.
+          IF lv_approval_level EQ '001' OR lv_approval_level EQ '002'.
+
+            "Email Subject
+            lv_subject = | Purchase Requisition # { lv_purchase_req_no } approved|.
+
+            "Email Body
+            lt_mailtext = VALUE #( ( line = |<p>Dear { ls_requestor_addr-fullname },</p>| )
+                                   ( line = |<p>Your request is approved by { ls_current_action_user_addr-fullname }. with following comments:</p>| )
+                                   ( line = '<p>' && '<b>' && lv_action_user_comments && '</b>' && '</p>' )
+                                   ( line = |<p>You can always check approval status by following the link below.</p>| )
+                                   ( line = '<p>Request Details</p>' )
+                                   ( line = |<p>Request Number:{ lv_purchase_req_no }</p>| )
+                                   ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                   ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                   ( line = '<p>Regards,</p>' )
+                                   ( line = '<p>SLC ITD</p>' ) ).
+          ELSE.
+
+            "Email Subject
+            lv_subject = |Purchase Req. #{ lv_purchase_req_no } approved|.
+
+            "Email Body
+            lt_mailtext = VALUE #( ( line = |<p>Dear { ls_requestor_addr-fullname },</p>| )
+                                   ( line = |<p>Your request is approved by { ls_current_action_user_addr-fullname } with following comments:</p>| )
+                                   ( line = '<p>' && '<b>' && lv_action_user_comments && '</b>' && '</p>' )
+                                   ( line = '<p>You can always check approval status by following the below link.</p>' )
+                                   ( line = '<p>Request Details</p>' )
+                                   ( line = |<p>Request Number:{ lv_purchase_req_no }</p>| )
+                                   ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                   ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                   ( line = '<p>Regards,</p>' )
+                                   ( line = '<p>SLC ITD</p>' ) ).
+          ENDIF.
+        ELSEIF iv_decision_key EQ '0002'.
+          "Email Subject
+          lv_subject = | Purchase Requisition # { lv_purchase_req_no } rejected|.
+
+          "Email Body
+          lt_mailtext = VALUE #( ( line = |<p>Dear { ls_requestor_addr-fullname },</p>| )
+                                 ( line = |<p>Your request is rejected by { ls_current_action_user_addr-fullname } with following comments:</p>| )
+                                 ( line = '<p>' && '<b>' && lv_action_user_comments && '</b>' && '</p>' )
+                                 ( line = '<p>You can always check approval status by following the below link.</p>' )
+                                 ( line = '<p>Request Details</p>' )
+                                 ( line = |<p>Request Number:{ lv_purchase_req_no }</p>| )
+                                 ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                 ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                 ( line = '<p>Regards,</p>' )
+                                 ( line = '<p>SLC ITD</p>' ) ).
+        ENDIF.
+
+        TRY.
+            lo_send_request = cl_bcs=>create_persistent( ).
+            IF lo_send_request IS BOUND.
+
+              "Add document to send request
+              lo_document = cl_document_bcs=>create_document( EXPORTING i_type    = 'HTM'
+                                                                        i_text    = lt_mailtext
+                                                                        i_subject = lv_subject ).
+              lo_send_request->set_document( lo_document ).
+
+              "Set sender
+              lo_sender = cl_sapuser_bcs=>create( sy-uname ).
+              lo_send_request->set_sender( lo_sender ).
+
+              " Add recipient
+              lo_recipient = cl_cam_address_bcs=>create_internet_address( ls_requestor_addr-e_mail ).
+              IF lo_recipient IS BOUND.
+                lo_send_request->add_recipient( EXPORTING i_recipient = lo_recipient
+                                                          i_express   = 'X' ).
+              ENDIF.
+
+              lo_send_request->send( i_with_error_screen = 'X' ).
+              COMMIT WORK.
+            ENDIF.
+
+          CATCH cx_document_bcs INTO DATA(lo_document_bcs).
+          CATCH cx_send_req_bcs INTO DATA(lo_send_req_bcs).
+          CATCH cx_address_bcs INTO DATA(lo_address_bcs).
+
+        ENDTRY.
+      ENDIF.
+      "----------------------------------------<<<<<----------------------------------------
+
+
+      "---------------------------------------->>>>>----------------------------------------
+      "Send email to the next purchase requisition action user
+      "---------------------------------------->>>>>----------------------------------------
+      IF iv_decision_key EQ '0001'.
+
+        "Get next approval level
+        CLEAR ls_swwwihead.
+        SELECT SINGLE wi_id,wi_type,def_guid FROM swwwihead INTO @ls_swwwihead WHERE wi_id     GT @is_wi_details-wi_id     AND
+                                                                                     top_wi_id EQ @is_wi_details-top_wi_id AND
+                                                                                     wi_type   EQ 'W'.
+        IF sy-subrc EQ 0.
+          CONDENSE ls_swwwihead-def_guid.
+          CLEAR lv_total_length.
+          lv_total_length = strlen( ls_swwwihead-def_guid ).
+          lv_total_length = lv_total_length - 1 .
+          IF ls_swwwihead-def_guid+lv_total_length(1) EQ 'S'.
+            lv_total_length = lv_total_length - 1 .
+            lv_next_step_no = ls_swwwihead-def_guid+lv_total_length(1).
+            lv_approval_level = lv_next_step_no.
+          ENDIF.
+        ENDIF.
+
+        IF lv_approval_level EQ '002'.
+          SELECT SINGLE * FROM zcon_agent_det INTO @DATA(ls_action_users) WHERE bsart EQ @ls_pr_details-bsart AND
+                                                                                ekorg EQ @ls_pr_details-ekorg AND
+                                                                                ekgrp EQ @ls_pr_details-ekgrp AND
+                                                                                matkl EQ @ls_pr_details-matkl AND
+                                                                                zlevel EQ @lv_approval_level.
+        ELSEIF lv_approval_level EQ '003'.
+          SELECT SINGLE * FROM zcon_agent_det INTO @ls_action_users WHERE bsart  EQ @ls_pr_details-bsart AND
+                                                                          ekorg  EQ @ls_pr_details-ekorg AND
+                                                                          zlevel EQ @lv_approval_level.
+        ENDIF.
+        IF sy-subrc EQ 0.
+
+          "Get next approver details
+          CLEAR lt_return.
+          CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+            EXPORTING
+              username = ls_action_users-approver
+            IMPORTING
+              address  = ls_next_approver_addr
+            TABLES
+              return   = lt_return.
+
+          "Email Subject
+          CLEAR lv_subject.
+          lv_subject = | Purchase requisition # { lv_purchase_req_no } Registered|.
+
+          "Email Body
+          CLEAR lt_mailtext.
+          lt_mailtext = VALUE #( ( line = |<p>Dear { ls_next_approver_addr-fullname }</p>| )
+                                 ( line = |<p>A request is registered by { ls_requestor_addr-fullname } and you are in the approver list.You can always check approval status by following the link below.</p>| )
+                                 ( line = '<p>Request Details</p>' )
+                                 ( line = |<p>Request Number :{ lv_purchase_req_no }</p>| )
+                                 ( line = |<p>Request Type: Purchase Requisition:{ ls_pr_details-batxt }({ ls_pr_details-bsart })</p>| )
+                                 ( line = '<p>Request Link :' && lv_my_inbox_url && '</p>' )
+                                 ( line = '<p>Regards,</p>' )
+                                 ( line = '<p>SLC ITD</p>' ) ).
+
+          TRY.
+              lo_send_request = cl_bcs=>create_persistent( ).
+              IF lo_send_request IS BOUND.
+
+                "Add document to send request
+                lo_document = cl_document_bcs=>create_document( EXPORTING i_type    = 'HTM'
+                                                                          i_text    = lt_mailtext
+                                                                          i_subject = lv_subject ).
+                lo_send_request->set_document( lo_document ).
+
+                "Set sender
+                lo_sender = cl_sapuser_bcs=>create( sy-uname ).
+                lo_send_request->set_sender( lo_sender ).
+
+                " Add recipient
+                lo_recipient = cl_cam_address_bcs=>create_internet_address( ls_next_approver_addr-e_mail ).
+                IF lo_recipient IS BOUND.
+                  lo_send_request->add_recipient( EXPORTING i_recipient = lo_recipient
+                                                            i_express   = 'X' ).
+                ENDIF.
+
+                lo_send_request->send( i_with_error_screen = 'X' ).
+                COMMIT WORK.
+              ENDIF.
+
+            CATCH cx_document_bcs INTO lo_document_bcs.
+            CATCH cx_send_req_bcs INTO lo_send_req_bcs.
+            CATCH cx_address_bcs INTO lo_address_bcs.
+
+          ENDTRY.
+        ENDIF.
+      ENDIF.
+      "----------------------------------------<<<<<----------------------------------------
+
+    ENDIF.
+
+  ENDMETHOD.
