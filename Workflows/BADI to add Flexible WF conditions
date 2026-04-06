@@ -1,5 +1,6 @@
 Enhancement Spot                    SWF_PROCESS_WORKFLOW_CONDITION
-BAdI Definition Name                SWF_WORKFLOW_CONDITION_DEF
+BAdI Definition Name                SWF_WORKFLOW_CONDITION_DEF  - Define additional Step or Pre condition
+BAdI Definition Name                SWF_WORKFLOW_CONDITION_EVAL - Evaluate additional step or Pre condition 
 
 ----------------------------------------------------->>>>>----------------------------------------------------
 Method     IF_SWF_FLEX_IFS_CONDITION_DEF~GET_CONDITIONS
