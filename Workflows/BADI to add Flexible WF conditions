@@ -1,0 +1,89 @@
+Enhancement Spot                    SWF_PROCESS_WORKFLOW_CONDITION
+BAdI Definition Name                SWF_WORKFLOW_CONDITION_DEF
+
+----------------------------------------------------->>>>>----------------------------------------------------
+Method     IF_SWF_FLEX_IFS_CONDITION_DEF~GET_CONDITIONS
+----------------------------------------------------->>>>>----------------------------------------------------
+  METHOD if_swf_flex_ifs_condition_def~get_conditions.
+
+*** condition id - value to be changed
+*    CONSTANTS: co_id TYPE if_swf_flex_ifs_condition_def=>ty_condition_id VALUE 'ZCL_FLEXIBLE_WORKFLOW_COND' ##NO_TEXT.
+    CONSTANTS co_id TYPE if_swf_flex_ifs_condition_def=>ty_condition_id VALUE 'ZCL_FLEXIBLE_WORKFLOW_COND' ##NO_TEXT.
+    DATA ls_conditions LIKE LINE OF  ct_condition.
+    DATA ls_parameters LIKE LINE OF ct_parameter.
+
+
+    ls_conditions-id      = 'MatGrp'.
+    ls_conditions-subject = 'This Material Group is used in at least one item'(001).
+    ls_conditions-type    = if_swf_flex_ifs_condition_def=>cs_condtype-start_step.
+    APPEND ls_conditions TO ct_condition.
+    CLEAR ls_conditions.
+
+    ls_parameters-id        = 'MatGrp'.
+    ls_parameters-name      = 'MaterialGroup'     .      " Do not translate component 'name'!
+    ls_parameters-shorttext = 'Material Group'(002).
+    ls_parameters-xsd_type  = if_swf_flex_ifs_condition_def=>cs_xstype-string.
+    ls_parameters-service_path = '/sap/opu/odata/sap/S_MMPURWORKFLOWVH_CDS/' .
+    ls_parameters-entity    = 'S_MMPURWorkflowVH'.
+    ls_parameters-property  = 'MaterialGroup'.
+    ls_parameters-mandatory   = abap_false.
+    APPEND ls_parameters TO ct_parameter.
+    CLEAR ls_parameters.
+
+
+    ls_conditions-id      = 'PurGrp'.
+    ls_conditions-subject = 'Purchase group in Purchase requisition'(003).
+    ls_conditions-type    = if_swf_flex_ifs_condition_def=>cs_condtype-start_step.
+    APPEND ls_conditions TO ct_condition.
+    CLEAR ls_conditions.
+
+    ls_parameters-id        = 'PurGrp'.
+    ls_parameters-name      = 'PurGroup'     .      " Do not translate component 'name'!
+    ls_parameters-shorttext = 'Purchase Group'(004).
+    ls_parameters-xsd_type  = if_swf_flex_ifs_condition_def=>cs_xstype-string.
+    ls_parameters-service_path = '/sap/opu/odata/sap/S_MMPURWORKFLOWVH_CDS/' .
+    ls_parameters-entity    = 'S_MMPURWorkflowVH'.
+    ls_parameters-property  = 'PurchasingGroup'.
+    ls_parameters-mandatory = abap_false.
+    APPEND ls_parameters TO ct_parameter.
+    CLEAR ls_parameters.
+
+
+
+    ls_conditions-id      = 'PurOrg'.
+    ls_conditions-subject = 'Purchase Organisation in Purchase requisition'(005).
+    ls_conditions-type    = if_swf_flex_ifs_condition_def=>cs_condtype-start_step.
+    APPEND ls_conditions TO ct_condition.
+    CLEAR ls_conditions.
+
+    ls_parameters-id        = 'PurOrg'.
+    ls_parameters-name      = 'PurOrg'     .      " Do not translate component 'name'!
+    ls_parameters-shorttext = 'Purchase Organization'(006).
+    ls_parameters-xsd_type  = if_swf_flex_ifs_condition_def=>cs_xstype-string.
+    ls_parameters-service_path = '/sap/opu/odata/sap/S_MMPURWORKFLOWVH_CDS/' .
+    ls_parameters-entity    = 'S_MMPURWorkflowVH'.
+    ls_parameters-property  = 'PurchasingOrganization'.
+    ls_parameters-mandatory = abap_false.
+    APPEND ls_parameters TO ct_parameter.
+    CLEAR ls_parameters.
+
+    ls_conditions-id      = 'id_Plant'.
+    ls_conditions-subject = 'Plant is Used in at least one item'(007).
+    ls_conditions-type    = if_swf_flex_ifs_condition_def=>cs_condtype-start_step.
+    APPEND ls_conditions TO ct_condition.
+    CLEAR ls_conditions.
+
+    ls_parameters-id        = 'id_Plant'.
+    ls_parameters-name      = 'Plant'     .      " Do not translate component 'name'!
+    ls_parameters-shorttext = 'Plant'(008).
+    ls_parameters-xsd_type  = if_swf_flex_ifs_condition_def=>cs_xstype-string.
+    ls_parameters-service_path = '/sap/opu/odata/sap/S_MMPURWORKFLOWVH_CDS/' .
+    ls_parameters-entity    = 'S_MMPURWorkflowVH'.
+    ls_parameters-property  = 'Plant'.
+    ls_parameters-mandatory = abap_false.
+    APPEND ls_parameters TO ct_parameter.
+    CLEAR ls_parameters.
+
+  ENDMETHOD.
+-----------------------------------------------------<<<<<----------------------------------------------------
+
