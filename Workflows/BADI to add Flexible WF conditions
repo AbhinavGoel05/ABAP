@@ -1,7 +1,5 @@
 Enhancement Spot                    SWF_PROCESS_WORKFLOW_CONDITION
 BAdI Definition Name                SWF_WORKFLOW_CONDITION_DEF  - Define additional Step or Pre condition
-BAdI Definition Name                SWF_WORKFLOW_CONDITION_EVAL - Evaluate additional step or Pre condition 
-
 ----------------------------------------------------->>>>>----------------------------------------------------
 Method     IF_SWF_FLEX_IFS_CONDITION_DEF~GET_CONDITIONS
 ----------------------------------------------------->>>>>----------------------------------------------------
@@ -88,3 +86,67 @@ Method     IF_SWF_FLEX_IFS_CONDITION_DEF~GET_CONDITIONS
   ENDMETHOD.
 -----------------------------------------------------<<<<<----------------------------------------------------
 
+
+----------------------------------------------------->>>>>----------------------------------------------------
+BAdI Definition Name                SWF_WORKFLOW_CONDITION_EVAL - Evaluate additional step or Pre condition 
+----------------------------------------------------->>>>>----------------------------------------------------
+DATA:lv_purchase_req_no     TYPE banfn,
+     lv_purchase_ord_no     TYPE ebeln,
+     lv_service_entry_sheet TYPE ebeln,
+     lv_cost_center         TYPE kostl.
+
+"Read the value maintained in the cost center in flexible workflow
+DATA(ls_cost_center_parameter) = VALUE #( it_parameter_value[ name = 'Cost Center is' ] OPTIONAL ).
+lv_cost_center = ls_cost_center_parameter-value.
+lv_cost_center = |{ lv_cost_center ALPHA = IN }|.
+
+"Read the received business document number and compare cost center to trigger the workflow
+CASE is_sap_object_node_type-sont.
+  WHEN 'PurchaseRequisition'.
+    lv_purchase_req_no = is_sap_object_node_type-sont_key_part_1.
+    lv_purchase_req_no = |{ lv_purchase_req_no ALPHA = IN }|.
+
+    IF lv_purchase_req_no IS NOT INITIAL.
+      SELECT SINGLE @abap_true FROM i_purreqnacctassgmtapi01 INTO @DATA(lv_exists)
+      WHERE purchaserequisition     EQ @lv_purchase_req_no AND
+            costcenter              EQ @lv_cost_center.
+      IF sy-subrc EQ 0.
+        cv_is_true = abap_true.
+      ELSE.
+        cv_is_true = abap_false.
+      ENDIF.
+    ENDIF.
+
+  WHEN 'PurchaseOrder'.
+    lv_purchase_ord_no = is_sap_object_node_type-sont_key_part_1.
+    lv_purchase_ord_no = |{ lv_purchase_ord_no ALPHA = IN }|.
+
+    IF lv_purchase_ord_no IS NOT INITIAL.
+      SELECT SINGLE @abap_true FROM i_purordaccountassignmentapi01 INTO @lv_exists
+       WHERE purchaseorder EQ @lv_purchase_ord_no AND
+             costcenter    EQ @lv_cost_center.
+      IF sy-subrc EQ 0.
+        cv_is_true = abap_true.
+      ELSE.
+        cv_is_true = abap_false.
+      ENDIF.
+    ENDIF.
+
+  WHEN 'ServiceEntrySheet'.
+    lv_service_entry_sheet = is_sap_object_node_type-sont_key_part_1.
+    lv_service_entry_sheet = |{ lv_service_entry_sheet ALPHA = IN }|.
+
+    IF lv_service_entry_sheet IS NOT INITIAL.
+      SELECT SINGLE a~serviceentrysheet,a~purchaseorder,b~costcenter FROM i_serviceentrysheetapi01 AS a
+      LEFT OUTER JOIN i_purordaccountassignmentapi01 AS b ON a~purchaseorder EQ b~purchaseorder
+      INTO @DATA(ls_ses_cost_center)
+      WHERE a~serviceentrysheet EQ @lv_service_entry_sheet.
+      IF sy-subrc EQ 0 AND ls_ses_cost_center-costcenter EQ lv_cost_center.
+        cv_is_true = abap_true.
+      ELSE.
+        cv_is_true = abap_false.
+      ENDIF.
+    ENDIF.
+  WHEN OTHERS.
+ENDCASE.
+-----------------------------------------------------<<<<<----------------------------------------------------
