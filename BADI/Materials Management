@@ -19,5 +19,16 @@ BADI Definition: SWF_WORKFLOW_CONDITION_EVAL
 BADI Implementation: YY1_EVALUATION_COST_CENTER
 SCENARIO_ID = (SCENARIO_ID = WS00800238) OR (SCENARIO_ID = WS02000458) OR (SCENARIO_ID = WS00800321)
 
+BADI4: Custom logic to check the PR item data on creating PR
+MM_PUR_S4_PR_CHECK
+
+BADI5:Custom logic to check PO data before save.
+BD_MMPUR_FINAL_CHECK_PO
+
+BADI6:Modify PO header data
+MM_PUR_S4_PO_MODIFY_HEADER
+
+BADI7:Modify PO item data
+MM_PUR_S4_PO_MODIFY_ITEM
 
 
