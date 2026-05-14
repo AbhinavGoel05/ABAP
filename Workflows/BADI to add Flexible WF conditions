@@ -1,5 +1,9 @@
 Enhancement Spot                    SWF_PROCESS_WORKFLOW_CONDITION
 BAdI Definition Name                SWF_WORKFLOW_CONDITION_DEF  - Define additional Step or Pre condition
+"1.)Overall released of Purchase Requisition(WS02000458)
+"2.)Release of Purchase Order(WS00800238)
+"3.)Service Entry Sheet Scenario(WS00800321)
+
 ----------------------------------------------------->>>>>----------------------------------------------------
 Method     IF_SWF_FLEX_IFS_CONDITION_DEF~GET_CONDITIONS
 ----------------------------------------------------->>>>>----------------------------------------------------
