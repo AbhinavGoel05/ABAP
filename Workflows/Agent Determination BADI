@@ -1,6 +1,6 @@
 Enhancement Spot: MMPUR_WORKFLOW_AGENTS_V2
 BADI Definition: MMPUR_WORKFLOW_AGENTS_V2
-Filter Value: BUSINESSOBJECT = PurchaseRequisition
+Filter Value: BUSINESSOBJECT CS PurchaseRequisition
 
 BADI Implementation Code:
   METHOD if_mmpur_workflow_agents_v2~get_approvers.
