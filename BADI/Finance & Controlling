@@ -1,0 +1,13 @@
+BADI1: To modify the payment advice item data in form output.
+BADI Definition: FBL_PAYM_ADV_PRINT_ITEM
+BADI Implementation:YY1_FBL_PAYM_ADV_PRINT_ITEM
+
+BADI2: To add custom logic while creating the supplier invoice using Create supplier invoice fiori application
+BADI Definition: MRM_CHECK_INVOICE
+BADI Implementation: YY1_MRM_CHECK_INVOICE
+
+BADI3: BADI to modify the payment advice header data in form output
+Business Context: Finance: Payment Advice (FINS_PAYMENT_ADVICE)
+BADI Definition: FBL_PAYM_ADV_PRINT_HEADER
+BADI Implementation: YY1_FBL_PAYM_ADV_PRINT
+
