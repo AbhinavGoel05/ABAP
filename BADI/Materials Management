@@ -1,0 +1,23 @@
+BADI1:For agent determination in SAP MM flexible workflows
+BADI Definition:MMPUR_WORKFLOW_AGENTS_V2
+BADI Implementation: YY1_MMPUR_WORKFLOW_AGENTS_V2
+Filters:(BUSINESSOBJECT = (BUSINESSOBJECT CS PurchaseRequisition) OR (BUSINESSOBJECT CS PurchaseOrder) OR (BUSINESSOBJECT CS ServiceEntrySheet).
+
+BADI2:To add additional workflow start condition and step start condition below mentioned workflow scenarios.
+      ->Overall released of Purchase Requisition Scenario with search help.
+      ->Release of Purchase Requisition Item with search help.
+      ->Service Entry Sheet with search help.
+BADI Definition: SWF_WORKFLOW_CONDITION_DEF
+BADI Implementation: YY1_COSTCENTERFILTERADDITION
+SCENARIO_ID = (SCENARIO_ID = WS00800238) OR (SCENARIO_ID = WS02000458) OR (SCENARIO_ID = WS00800321)
+
+BADI3:To validate additional workflow start condition and step start condition below mentioned workflow scenarios.
+      ->Overall released of Purchase Requisition Scenario with search help.
+      ->Release of Purchase Requisition Item with search help.
+      ->Service Entry Sheet with search help.
+BADI Definition: SWF_WORKFLOW_CONDITION_EVAL
+BADI Implementation: YY1_EVALUATION_COST_CENTER
+SCENARIO_ID = (SCENARIO_ID = WS00800238) OR (SCENARIO_ID = WS02000458) OR (SCENARIO_ID = WS00800321)
+
+
+
