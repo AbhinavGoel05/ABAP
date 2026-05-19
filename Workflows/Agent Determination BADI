@@ -216,8 +216,159 @@ BADI Implementation Code:
           CATCH cx_address_bcs INTO lo_address_bcs.
         ENDTRY.
       ENDIF.
-*    "--------------------------------->>>>>--------------------------------------
+*    "---------------------------------<<<<<--------------------------------------
     ENDIF.
 
 
   ENDMETHOD.
+
+*    "--------------------------------->>>>>--------------------------------------
+"Another sample code for agent determination
+*    "--------------------------------->>>>>--------------------------------------
+"-------------------------------------------------------->>>>>--------------------------------------------------------
+"Determine agents for purchasing documents
+"-------------------------------------------------------->>>>>--------------------------------------------------------
+DATA:ls_new_approver  TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_s_badi_approver,
+     ls_badi_approver TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_s_badi_approver,
+     lt_badi_approver TYPE if_mmpur_workflow_agents_v2=>bd_mmpur_t_badi_approver.
+
+IF businessobject CS 'PurchaseRequisition'.
+
+  "Check if purchase requisition consists of wbs elemenet or not
+  SELECT SINGLE wbselementinternalid_2 FROM i_purreqnacctassgmtapi01 WHERE purchaserequisition EQ @purchasingdocument
+  INTO @DATA(lv_wbsinternalid).
+  IF sy-subrc EQ 0 AND lv_wbsinternalid NE '00000000'.
+
+    SELECT a~wbselementinternalid_2,b~projectinternalid,c~projectuuid,d~projectroleuuid,f~teammemberuuid,g~businesspartneruuid,h~userid
+    FROM i_purreqnacctassgmtapi01 AS a LEFT OUTER JOIN i_enterpriseprojectelement AS b ON b~wbselementinternalid EQ a~wbselementinternalid_2
+                                       LEFT OUTER JOIN i_enterpriseproject AS c ON c~projectinternalid EQ b~projectinternalid
+                                       LEFT OUTER JOIN i_entprojectentitlement AS d ON d~projectuuid EQ c~projectuuid
+                                       INNER JOIN i_enterpriseprojectrole AS e ON e~projectroleuuid EQ d~projectroleuuid AND
+                                                                                  e~projectrolecategory EQ 'PM'
+                                       LEFT OUTER JOIN i_entprojectentitlement AS f ON f~projectroleuuid EQ e~projectroleuuid
+                                       LEFT OUTER JOIN i_enterpriseprojectteammember AS g ON g~teammemberuuid EQ f~teammemberuuid
+                                       LEFT OUTER JOIN i_workforcepersondex AS h ON h~businesspartneruuid EQ g~businesspartneruuid
+    WHERE a~purchaserequisition EQ @purchasingdocument
+    INTO TABLE @DATA(lt_wbs_approvers).
+    IF sy-subrc EQ 0.
+      LOOP AT lt_wbs_approvers ASSIGNING FIELD-SYMBOL(<lfs_lwbs_approvers>).
+        CLEAR ls_badi_approver.
+        ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+        ls_badi_approver-businessuser  = <lfs_lwbs_approvers>-userid.
+        APPEND ls_badi_approver TO lt_badi_approver.
+      ENDLOOP.
+    ENDIF.
+
+  ELSE.
+
+    SELECT SINGLE b~costctrresponsibleuser
+    FROM i_purreqnacctassgmtapi01 AS a LEFT OUTER JOIN i_costcenter AS b ON b~costcenter EQ a~costcenter
+    WHERE a~purchaserequisition EQ @purchasingdocument AND
+          b~controllingarea EQ 'A000'
+    INTO @DATA(lv_costcenter_responsible_user).
+    IF sy-subrc EQ 0.
+      ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+      ls_badi_approver-businessuser  = lv_costcenter_responsible_user.
+      APPEND ls_badi_approver TO lt_badi_approver.
+    ENDIF.
+
+  ENDIF.
+
+ELSEIF businessobject CS 'PurchaseOrder'.
+
+  "Check if purchase order consists of wbs elemenet or not
+  SELECT SINGLE wbselementinternalid_2 FROM i_purordaccountassignmentapi01 WHERE purchaseorder EQ @purchasingdocument
+  INTO @lv_wbsinternalid.
+  IF sy-subrc EQ 0 AND lv_wbsinternalid NE '00000000'.
+
+    SELECT a~wbselementinternalid_2,b~projectinternalid,c~projectuuid,d~projectroleuuid,f~teammemberuuid,g~businesspartneruuid,h~userid
+       FROM i_purordaccountassignmentapi01 AS a LEFT OUTER JOIN i_enterpriseprojectelement AS b ON b~wbselementinternalid EQ a~wbselementinternalid_2
+                                                LEFT OUTER JOIN i_enterpriseproject AS c ON c~projectinternalid EQ b~projectinternalid
+                                                LEFT OUTER JOIN i_entprojectentitlement AS d ON d~projectuuid EQ c~projectuuid
+                                                INNER JOIN i_enterpriseprojectrole AS e ON e~projectroleuuid EQ d~projectroleuuid AND
+                                                                                      e~projectrolecategory EQ 'PM'
+                                                LEFT OUTER JOIN i_entprojectentitlement AS f ON f~projectroleuuid EQ e~projectroleuuid
+                                                LEFT OUTER JOIN i_enterpriseprojectteammember AS g ON g~teammemberuuid EQ f~teammemberuuid
+                                                LEFT OUTER JOIN i_workforcepersondex AS h ON h~businesspartneruuid EQ g~businesspartneruuid
+       WHERE a~purchaseorder EQ @purchasingdocument
+       INTO TABLE @lt_wbs_approvers.
+    IF sy-subrc EQ 0.
+      LOOP AT lt_wbs_approvers ASSIGNING <lfs_lwbs_approvers>.
+        CLEAR ls_badi_approver.
+        ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+        ls_badi_approver-businessuser  = <lfs_lwbs_approvers>-userid.
+        APPEND ls_badi_approver TO lt_badi_approver.
+      ENDLOOP.
+    ENDIF.
+
+  ELSE.
+
+    SELECT SINGLE b~costctrresponsibleuser
+    FROM i_purordaccountassignmentapi01 AS a LEFT OUTER JOIN i_costcenter AS b ON b~costcenter EQ a~costcenter
+    WHERE a~purchaseorder EQ @purchasingdocument AND
+          b~controllingarea EQ 'A000'
+    INTO @lv_costcenter_responsible_user.
+    IF sy-subrc EQ 0.
+      ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+      ls_badi_approver-businessuser  = lv_costcenter_responsible_user.
+      APPEND ls_badi_approver TO lt_badi_approver.
+    ENDIF.
+
+  ENDIF.
+
+ELSEIF businessobject CS 'ServiceEntrySheet'.
+
+  "Check if service entry sheet consists of wbs elemenet or not
+  SELECT SINGLE b~wbselementinternalid_2
+  FROM i_serviceentrysheetapi01 AS a LEFT OUTER JOIN i_purordaccountassignmentapi01 AS b ON b~purchaseorder EQ a~purchaseorder
+  WHERE a~serviceentrysheet EQ @purchasingdocument
+  INTO @lv_wbsinternalid.
+  IF sy-subrc EQ 0 AND lv_wbsinternalid NE '00000000'.
+
+    SELECT b~wbselementinternalid_2,c~projectinternalid,d~projectuuid,e~projectroleuuid,g~teammemberuuid,h~businesspartneruuid,i~userid
+       FROM i_serviceentrysheetapi01 AS a LEFT OUTER JOIN i_purordaccountassignmentapi01 AS b ON b~purchaseorder EQ a~purchaseorder
+                                                LEFT OUTER JOIN i_enterpriseprojectelement AS c ON c~wbselementinternalid EQ b~wbselementinternalid_2
+                                                LEFT OUTER JOIN i_enterpriseproject AS d ON d~projectinternalid EQ c~projectinternalid
+                                                LEFT OUTER JOIN i_entprojectentitlement AS e ON e~projectuuid EQ d~projectuuid
+                                                INNER JOIN i_enterpriseprojectrole AS f ON f~projectroleuuid EQ e~projectroleuuid AND
+                                                                                           f~projectrolecategory EQ 'PM'
+                                                LEFT OUTER JOIN i_entprojectentitlement AS g ON g~projectroleuuid EQ f~projectroleuuid
+                                                LEFT OUTER JOIN i_enterpriseprojectteammember AS h ON h~teammemberuuid EQ g~teammemberuuid
+                                                LEFT OUTER JOIN i_workforcepersondex AS i ON i~businesspartneruuid EQ h~businesspartneruuid
+       WHERE a~serviceentrysheet EQ @purchasingdocument
+       INTO TABLE @lt_wbs_approvers.
+    IF sy-subrc EQ 0.
+      LOOP AT lt_wbs_approvers ASSIGNING <lfs_lwbs_approvers>.
+        CLEAR ls_badi_approver.
+        ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+        ls_badi_approver-businessuser  = <lfs_lwbs_approvers>-userid.
+        APPEND ls_badi_approver TO lt_badi_approver.
+      ENDLOOP.
+    ENDIF.
+
+  ELSE.
+
+    SELECT SINGLE c~costctrresponsibleuser
+    FROM i_serviceentrysheetapi01 AS a LEFT OUTER JOIN i_purordaccountassignmentapi01 AS b ON b~purchaseorder EQ a~purchaseorder
+                                       LEFT OUTER JOIN i_costcenter AS c ON c~costcenter EQ b~costcenter
+    WHERE a~serviceentrysheet EQ @purchasingdocument AND
+          c~controllingarea EQ 'A000'
+    INTO @lv_costcenter_responsible_user.
+    IF sy-subrc EQ 0.
+      ls_badi_approver-approvallevel = lines( previousapproverlist ) + 1.
+      ls_badi_approver-businessuser  = lv_costcenter_responsible_user.
+      APPEND ls_badi_approver TO lt_badi_approver.
+    ENDIF.
+  ENDIF.
+
+ENDIF.
+
+CLEAR ls_badi_approver.
+IF lt_badi_approver IS NOT INITIAL.
+  READ TABLE lt_badi_approver INTO ls_badi_approver INDEX 1.
+  LOOP AT lt_badi_approver INTO ls_new_approver WHERE approvallevel = ls_badi_approver-approvallevel.
+    APPEND ls_new_approver-businessuser TO approverlist.
+  ENDLOOP.
+ENDIF.
+
+*    "---------------------------------<<<<<--------------------------------------
