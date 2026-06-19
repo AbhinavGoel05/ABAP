@@ -1,5 +1,63 @@
 ALV with custom toolbar button handling 
 
+    CLASS lcl_exception DEFINITION INHERITING FROM cx_static_check.
+      PUBLIC SECTION.
+        INTERFACES:if_t100_dyn_msg.
+    ENDCLASS.
+
+START-OF-SELECTION.
+  "------------------------------------>>>>>------------------------------------
+"Exception handling using local class
+  go_sales_order_upload = NEW #( ).
+  IF go_sales_order_upload IS BOUND.
+    TRY.
+        go_sales_order_upload->display_uploaded_data( ).
+      CATCH lcl_exception INTO DATA(lo_exception).
+        lo_exception->get_text( RECEIVING result = DATA(lv_message) ).
+        MESSAGE lv_message TYPE 'S' DISPLAY LIKE 'E'.
+    ENDTRY.
+  ENDIF.
+"------------------------------------>>>>>------------------------------------
+
+    CLASS lcl_handle_events DEFINITION.
+      PUBLIC SECTION.
+        CLASS-METHODS:on_link_click FOR EVENT link_click OF cl_salv_events_table IMPORTING row column.
+        CLASS-METHODS:added_function FOR EVENT added_function OF cl_salv_events_table IMPORTING e_salv_function.
+    ENDCLASS.
+
+  "Set event handler for custom actions
+         Data:lo_events        TYPE REF TO cl_salv_events_table,
+              lo_events = go_alv->get_event( ).
+              SET HANDLER lcl_handle_events=>added_function FOR lo_events.
+              SET HANDLER lcl_handle_events=>on_link_click FOR lo_events.
+
+"Select checkbox on record selection
+      METHOD on_link_click.
+        READ TABLE gt_sales_order_data ASSIGNING FIELD-SYMBOL(<lfa_data>) INDEX row.
+        CHECK sy-subrc IS INITIAL.
+        IF <lfa_data>-checkbox IS INITIAL.
+          <lfa_data>-checkbox = 'X'.
+        ELSE.
+          CLEAR <lfa_data>-checkbox.
+        ENDIF.
+        go_alv->refresh( ).
+      ENDMETHOD.
+
+"Select All and Deselect ALl records
+METHOD added_function.
+  CASE sy-ucomm.
+          WHEN 'PRC'.
+            go_sales_order_upload->generate_sales_order( ).
+          WHEN 'ALL'.
+            MODIFY gt_sales_order_data FROM VALUE #( checkbox = 'X' ) TRANSPORTING checkbox
+            WHERE checkbox IS INITIAL.
+            go_alv->refresh( ).
+          WHEN 'CLEAR'.
+            MODIFY gt_sales_order_data FROM VALUE #( checkbox = '' ) TRANSPORTING checkbox
+            WHERE checkbox IS NOT INITIAL.
+            go_alv->refresh( ).
+ENDMETHOD.
+
 METHOD display_ageing_output. 
  
     DATA:lo_alv          TYPE REF TO cl_salv_table, 
