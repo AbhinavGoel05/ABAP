@@ -1,0 +1,315 @@
+Application job template to extract the workflow decision logs for purchasing documents and send them as excel file attachment in user inbox via email in public cloud system.
+
+CLASS zmm_cl_procurement_workflow_lg DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+
+    INTERFACES if_apj_rt_run.
+
+    TYPES:lv_cbuserid TYPE c LENGTH 12.
+
+    DATA:p_pr(1)    TYPE c,
+         p_po(1)    TYPE c,
+         p_si(1)    TYPE c,
+         p_sq(1)    TYPE c,
+         p_ses(1)   TYPE c,
+         p_dp(1)    TYPE c,
+         p_ctr(1)   TYPE c,
+         p_InApv(1) TYPE c,
+         p_rej(1)   TYPE c,
+         p_appv(1)  TYPE c,
+         s_remail   TYPE RANGE OF string,
+         s_date     TYPE RANGE OF datum,
+         s_cbuserid TYPE RANGE OF lv_cbuserid.
+
+  PROTECTED  SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS zmm_cl_procurement_workflow_lg IMPLEMENTATION.
+
+  METHOD if_apj_rt_run~execute.
+
+    TYPES:lv_WorkflowScenarioDefinition TYPE c LENGTH 14,
+          lv_status                     TYPE c LENGTH 12.
+
+    DATA:lt_wf_action_logs             TYPE STANDARD TABLE OF zmm_cds_cp_purchasing_wf_logs,
+         lr_WorkflowScenarioDefinition TYPE RANGE OF lv_WorkflowScenarioDefinition,
+         lr_cbuserid                   TYPE RANGE OF char12,
+         lr_status                     TYPE RANGE OF lv_status.
+
+    DATA: lv_excel_file_data TYPE string,
+          lv_xstring         TYPE xstring,
+          lv_recipient       TYPE c LENGTH 512,
+          lv_sender_emailid  TYPE c LENGTH 512.
+
+    "------------------------------------->>>>>-------------------------------------
+    "Scenarios for data extraction
+    "------------------------------------->>>>>-------------------------------------
+
+    IF p_pr IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS02000458' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_po IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800238' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_si IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800303' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_sq IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800193' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_ses IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800321' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_dp IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800208' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_ctr IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'WS00800304' ) TO lr_WorkflowScenarioDefinition.
+    ENDIF.
+
+    IF p_rej IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'Rejected' ) TO lr_status.
+    ENDIF.
+
+    IF p_appv IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'Approved' ) TO lr_status.
+    ENDIF.
+
+    "-------------------------------------<<<<--------------------------------------
+
+    "------------------------------------->>>>>-------------------------------------
+    "Get purchasing documents workflow logs for approved and rejected status
+    "------------------------------------->>>>>-------------------------------------
+    LOOP AT s_cbuserid ASSIGNING FIELD-SYMBOL(<lfs_cbuserid>).
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = <lfs_cbuserid>-low ) TO lr_cbuserid.
+    ENDLOOP.
+
+    IF p_rej IS NOT INITIAL OR p_appv IS NOT INITIAL.
+      SELECT * FROM zmm_cds_cp_purchasing_wf_logs WHERE ActionUser                 IN @lr_cbuserid AND
+                                                        WorkflowScenarioDefinition IN @lr_WorkflowScenarioDefinition AND
+                                                        CompletionDate             IN @s_date AND
+                                                        status                     IN @lr_status
+      INTO TABLE @DATA(lt_po_approval_details).
+      IF sy-subrc EQ 0.
+        SORT lt_po_approval_details BY WorkflowScenarioDefinition Status ActionUser CompletionDate CompletionTime.
+        APPEND LINES OF lt_po_approval_details TO lt_wf_action_logs.
+      ENDIF.
+    ENDIF.
+    "-------------------------------------<<<<--------------------------------------
+
+    "------------------------------------->>>>>-------------------------------------
+    "Get purchasing documents workflow logs for in-approval status
+    "------------------------------------->>>>>-------------------------------------
+    IF p_InApv IS NOT INITIAL.
+      CLEAR lr_status.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = 'In Approval' ) TO lr_status.
+
+      SELECT * FROM zmm_cds_cp_purchasing_wf_logs WHERE ActionUser                 IN @lr_cbuserid AND
+                                                        WorkflowScenarioDefinition IN @lr_WorkflowScenarioDefinition AND
+                                                        CreationDate               IN @s_date AND
+                                                        status                     IN @lr_status
+      INTO TABLE @DATA(lt_po_inapproval_details).
+      IF sy-subrc EQ 0.
+        SORT lt_po_inapproval_details BY WorkflowScenarioDefinition Status ActionUser CompletionDate CompletionTime.
+        APPEND LINES OF lt_po_inapproval_details TO lt_wf_action_logs.
+      ENDIF.
+    ENDIF.
+    "-------------------------------------<<<<--------------------------------------
+
+    "------------------------------------->>>>>-------------------------------------
+    "Send purchasing documents workflow logs as attachment in email
+    "------------------------------------->>>>>-------------------------------------
+
+    "Prepare excel file column headers
+    CONCATENATE lv_excel_file_data    cl_abap_char_utilities=>horizontal_tab
+                'Action User'         cl_abap_char_utilities=>horizontal_tab
+                'Action User Name'    cl_abap_char_utilities=>horizontal_tab
+                'Purchasing Document' cl_abap_char_utilities=>horizontal_tab
+                'Purchasing Doc No.'  cl_abap_char_utilities=>horizontal_tab
+                'Status'              cl_abap_char_utilities=>horizontal_tab
+                'Date(DD/MM/YYYY)'    cl_abap_char_utilities=>horizontal_tab
+                'Time'                cl_abap_char_utilities=>cr_lf
+                INTO lv_excel_file_data.
+
+    "Prepare excel file column data
+    LOOP AT lt_wf_action_logs ASSIGNING FIELD-SYMBOL(<lfs_output_data>).
+
+      IF <lfs_output_data>-CompletionDate IS NOT INITIAL.
+        DATA(lv_completion_date) = <lfs_output_data>-CompletionDate+6(2) && '/' &&
+                                   <lfs_output_data>-CompletionDate+4(2) && '/' &&
+                                   <lfs_output_data>-CompletionDate+0(4).
+      ENDIF.
+
+      CONCATENATE lv_excel_file_data                  cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-ActionUser        cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-ActionUserName    cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-PurchasingDocType cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-PurchasingDocNo   cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-Status            cl_abap_char_utilities=>horizontal_tab
+                  lv_completion_date                  cl_abap_char_utilities=>horizontal_tab
+                  <lfs_output_data>-CompletionTime    cl_abap_char_utilities=>cr_lf INTO lv_excel_file_data.
+
+      CLEAR lv_completion_date.
+    ENDLOOP.
+
+    IF lv_excel_file_data IS NOT INITIAL.
+      lv_xstring = xco_cp=>string( lv_excel_file_data )->as_xstring( xco_cp_character=>code_page->utf_8 )->value.
+
+      TRY.
+          " 1. Create mail instance
+          DATA(lo_mail) = cl_bcs_mail_message=>create_instance( ).
+
+          " 2. Set Basic Details
+          CLEAR lv_sender_emailid.
+          lv_sender_emailid = 'noreply@dreuae.ae'.
+          lo_mail->set_sender( EXPORTING iv_address = lv_sender_emailid ).
+          lo_mail->set_subject( 'Documents approved by approver(s) in SAP' ).
+
+          " 3. Set Body (Main Content)
+
+          "Get current user name
+          TRY.
+              DATA(lv_full_name) = cl_abap_context_info=>get_user_formatted_name( ).
+            CATCH cx_abap_context_info_error.
+              " Handle exception if context info cannot be fetched
+          ENDTRY.
+
+          lo_mail->set_main( cl_bcs_mail_textpart=>create_instance(
+            iv_content      = |<p>Dear { lv_full_name },<br>PFA the report of SAP documents, approved by approver(s), as requested by you.</p>|
+            iv_content_type = 'text/html' ) ).
+
+          " 4. Add Attachment
+          lo_mail->add_attachment( cl_bcs_mail_binarypart=>create_instance(
+            iv_content      = lv_xstring
+            iv_content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            iv_filename     = 'Workflow action logs.xls' ) ).
+
+          " 5. Send
+          LOOP AT s_remail ASSIGNING FIELD-SYMBOL(<lfs_email_id>).
+            CLEAR lv_recipient.
+            lv_recipient = <lfs_email_id>-low.
+            lo_mail->add_recipient( EXPORTING iv_address = lv_recipient ).
+            lo_mail->send( IMPORTING ev_mail_status = DATA(lv_status) ).
+            COMMIT WORK.
+          ENDLOOP.
+
+        CATCH cx_bcs_mail INTO DATA(lx_mail).
+          " Handle error
+      ENDTRY.
+
+    ENDIF.
+    "-------------------------------------<<<<--------------------------------------
+
+  ENDMETHOD.
+ "-------------------------------------<<<<--------------------------------------
+
+
+ENDCLASS.
+
+    "------------------------------------->>>>>-------------------------------------
+    "CDS view to extract the workflow decision logs for purchasing documents.
+    "------------------------------------->>>>>-------------------------------------
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Purchainsg Wokflow Logs'
+@Metadata.ignorePropagatedAnnotations: true
+@VDM.viewType: #COMPOSITE
+
+define view entity ZMM_CDS_CP_PURCHASING_WF_LOGS
+  as select from    I_WorkflowStatusOverview as WfOverview
+    left outer join I_WorkflowStatusDetails  as WfDetails           on WfOverview.WorkflowInternalID = WfDetails.WorkflowInternalID
+    left outer join I_BusinessUserBasic      as _BusinessUserBasic  on _BusinessUserBasic.UserID = WfDetails.WorkflowTaskProcessor
+    left outer join I_WorkflowRecipients_V2  as _WorkflowRecipients on _WorkflowRecipients.WorkflowTaskInternalID = WfDetails.WorkflowTaskInternalID
+    left outer join I_BusinessUserBasic      as _BusinessUserBasic1 on _BusinessUserBasic1.UserID = _WorkflowRecipients.WorkflowTaskRecipient
+{
+  key WfOverview.SAPBusinessObjectNodeKey1       as PurchasingDocNo,
+      WfOverview.WorkflowScenarioDefinition      as WorkflowScenarioDefinition,
+
+      case WfOverview.WorkflowScenarioDefinition
+      when 'WS00800238' then 'Purchase Order'
+      when 'WS02000458' then 'Purchase Requisition'
+      when 'WS00800303' then 'Supplier Invoice'
+      when 'WS00800193' then 'Supplier Quotation'
+      when 'WS00800321' then 'Service Entry Sheet'
+      when 'WS00800208' then 'Down Payment'
+      when 'WS00800304' then 'Purchase Contract'
+      else ''
+      end                                        as PurchasingDocType,
+
+      WfDetails.WorkflowTaskResult               as WorkflowTaskResult,
+
+      case WfDetails.WorkflowTaskResult
+      when 'RELEASED' then 'Approved'
+      when 'REJECTED' then 'Rejected'
+      else 'In Approval' end                     as Status,
+
+      case $projection.Status
+      when 'In Approval' then _WorkflowRecipients.WorkflowTaskRecipient
+      else WfDetails.WorkflowTaskProcessor end   as ActionUser,
+
+      case $projection.Status
+      when 'In Approval' then _BusinessUserBasic1.PersonFullName
+      else _BusinessUserBasic.PersonFullName end as ActionUserName,
+
+      tstmp_to_dats(
+      WfDetails.WrkflwTskCompletionUTCDateTime,
+      abap_user_timezone( $session.user, $session.client, 'FAIL' ),
+      $session.client,
+      'NULL'
+      )                                          as CompletionDate,
+
+      tstmp_to_tims(
+          WfDetails.WrkflwTskCompletionUTCDateTime,
+          abap_user_timezone( $session.user, $session.client, 'FAIL' ),
+          $session.client,
+          'NULL'
+        )                                        as CompletionTime,
+
+      tstmp_to_dats(
+      WfDetails.WrkflwTskCreationUTCDateTime,
+      abap_user_timezone( $session.user, $session.client, 'FAIL' ),
+      $session.client,
+      'NULL'
+      )                                          as CreationDate,
+
+      tstmp_to_tims(
+          WfDetails.WrkflwTskCreationUTCDateTime,
+          abap_user_timezone( $session.user, $session.client, 'FAIL' ),
+          $session.client,
+          'NULL'
+        )                                        as CreationTime
+
+}
+where
+  (
+       WfOverview.WorkflowExternalStatus     = 'COMPLETED'
+    or WfOverview.WorkflowExternalStatus     = 'STARTED'
+  )
+  and(
+       WfOverview.WorkflowScenarioDefinition = 'WS00800238' /*Purchase Order*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS02000458' /*Purchase Requisition*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS00800303' /*Supplier Invoice*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS00800193' /*Supplier Quotation*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS00800321' /*Service Entry Sheet*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS00800208' /*Down Payment*/
+    or WfOverview.WorkflowScenarioDefinition = 'WS00800304' /*Purchase Contract*/
+  )
+  and(
+       WfDetails.WorkflowTaskResult          = 'REJECTED'
+    or WfDetails.WorkflowTaskResult          = 'RELEASED'
+    or WfDetails.WorkflowTaskResult          is null
+  )
+  and  WfDetails.WorkflowTaskExternalStatus  is not null
+"-------------------------------------<<<<--------------------------------------
+
